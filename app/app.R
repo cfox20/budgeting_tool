@@ -97,6 +97,7 @@ load_budget_targets <- function() {
   }
 }
 
+
 backup_preview <- function() {
   if (file.exists(backup_path)) {
     readr::read_csv(
@@ -122,6 +123,7 @@ coerce_value <- function(value, column_name) {
     return(parsed)
   }
   if (column_name %in% c("Amount", "Target")) {
+
     parsed <- suppressWarnings(as.numeric(value))
     if (is.na(parsed)) stop("Please supply a numeric amount.")
     return(parsed)
@@ -213,6 +215,7 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
+
       title = "Reports",
       fluidRow(
         column(
@@ -255,6 +258,7 @@ ui <- fluidPage(
           h3("Under budget"),
           DTOutput("under_budget_table")
         )
+
       )
     )
   )
@@ -275,6 +279,7 @@ server <- function(input, output, session) {
       session,
       "category",
       choices = category_choices,
+
       server = TRUE
     )
     updateSelectizeInput(
@@ -341,7 +346,6 @@ server <- function(input, output, session) {
       showNotification(conditionMessage(e), type = "error")
     })
   })
-
   observeEvent(input$add_income, {
     source_name <- trimws(input$income_name)
     validate(
@@ -602,7 +606,6 @@ server <- function(input, output, session) {
       scale_y_continuous(labels = scales::dollar_format()) +
       theme_minimal(base_size = 14)
   })
-
   output$budget_progress_plot <- renderPlot({
     summary <- category_summary_data()
     progress <- summary %>%
@@ -672,7 +675,6 @@ server <- function(input, output, session) {
       formatCurrency(c("Total", "Target", "Remaining"), currency = "$", interval = 3, mark = ",", digits = 2) %>%
       formatPercentage("PercentOfTarget", digits = 1)
   })
-
   output$detailed_table <- renderDT({
     df <- filtered_expenses()
     validate(need(nrow(df) > 0, "No expenses match the selected range."))

@@ -2,6 +2,7 @@ data/expenses.csv
 data/expenses_backup.csv
 data/income_sources.csv
 data/category_budget.csv
+
 app/www/
 .Rhistory
 .RData

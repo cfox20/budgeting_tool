@@ -10,6 +10,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 - **Spending analytics** – filter by date range (defaults to the last month), exclude non-positive amounts, inspect totals by category, and view a bar chart of spending along with the detailed transaction list.
 - **Budget planning** – capture multiple income sources, set monthly targets for each category, and track progress plus over/under budget categories in the reports tab.
 
+
 ## Getting started
 
 1. **Install R** (version 4.0 or newer is recommended).
@@ -45,6 +46,7 @@ transactions, income sources, and budget targets. When you're ready to start
 using your own numbers, delete the CSV files in the `data/` directory (or move
 them elsewhere) and the app will recreate fresh, empty versions the next time it
 launches.
+
 
 ## Notes
 
