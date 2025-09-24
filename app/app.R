@@ -11,8 +11,10 @@ library(scales)
 data_dir <- file.path("..", "data")
 expenses_path <- file.path(data_dir, "expenses.csv")
 backup_path <- file.path(data_dir, "expenses_backup.csv")
+
 income_path <- file.path(data_dir, "income_sources.csv")
 budget_path <- file.path(data_dir, "category_budget.csv")
+
 
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
@@ -67,6 +69,7 @@ load_expenses <- function() {
   }
 }
 
+
 load_income_sources <- function() {
   if (file.exists(income_path)) {
     readr::read_csv(
@@ -97,6 +100,7 @@ load_budget_targets <- function() {
   }
 }
 
+
 backup_preview <- function() {
   if (file.exists(backup_path)) {
     readr::read_csv(
@@ -122,6 +126,8 @@ coerce_value <- function(value, column_name) {
     return(parsed)
   }
   if (column_name %in% c("Amount", "Target")) {
+ 
+
     parsed <- suppressWarnings(as.numeric(value))
     if (is.na(parsed)) stop("Please supply a numeric amount.")
     return(parsed)
@@ -213,6 +219,7 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
+
       title = "Reports",
       fluidRow(
         column(
@@ -275,6 +282,7 @@ server <- function(input, output, session) {
       session,
       "category",
       choices = category_choices,
+
       server = TRUE
     )
     updateSelectizeInput(
@@ -464,7 +472,6 @@ server <- function(input, output, session) {
     })
     showNotification("Budget settings saved successfully.", type = "message")
   })
-
   save_preview_backup <- eventReactive(input$save_expenses, {
     bk <- backup_preview()
     if (is.null(bk)) {
@@ -573,6 +580,7 @@ server <- function(input, output, session) {
         Variance = ifelse(is.na(Target), NA_real_, Total - Target),
         PercentOfTarget = ifelse(!is.na(Target) & Target > 0, Total / Target, NA_real_)
       )
+
     summary
   })
 
@@ -589,6 +597,7 @@ server <- function(input, output, session) {
       formatCurrency("Variance", currency = "$", interval = 3, mark = ",", digits = 2) %>%
       formatPercentage("Percentage", digits = 1) %>%
       formatPercentage("PercentOfTarget", digits = 1)
+
   })
 
   output$category_plot <- renderPlot({
@@ -672,7 +681,6 @@ server <- function(input, output, session) {
       formatCurrency(c("Total", "Target", "Remaining"), currency = "$", interval = 3, mark = ",", digits = 2) %>%
       formatPercentage("PercentOfTarget", digits = 1)
   })
-
   output$detailed_table <- renderDT({
     df <- filtered_expenses()
     validate(need(nrow(df) > 0, "No expenses match the selected range."))

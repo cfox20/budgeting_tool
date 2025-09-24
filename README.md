@@ -10,6 +10,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 - **Spending analytics** – filter by date range (defaults to the last month), exclude non-positive amounts, inspect totals by category, and view a bar chart of spending along with the detailed transaction list.
 - **Budget planning** – capture multiple income sources, set monthly targets for each category, and track progress plus over/under budget categories in the reports tab.
 
+
 ## Getting started
 
 1. **Install R** (version 4.0 or newer is recommended).
@@ -31,8 +32,10 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 
 - `data/expenses.csv` – primary storage for all expense records. This file is ignored by Git so your personal data stays local.
 - `data/expenses_backup.csv` – the most recent backup created right before you confirm a save. Review the modal preview carefully before overwriting the backup.
+
 - `data/income_sources.csv` – saved list of your income sources and the amounts entered on the Budget Planning tab.
 - `data/category_budget.csv` – saved monthly targets by category used to compare actual spending against your goals.
+
 
 If either file does not exist yet, they will be created automatically after you add and save your first expense.
 
