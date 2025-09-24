@@ -11,6 +11,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .data_store import BudgetDataStore
 from .shiny_launcher import ShinyAppProcess
 
+def _determine_data_dir(project_root: Path) -> Path:
+    """Return the directory used to persist user data."""
 
 def _determine_data_dir(project_root: Path) -> Path:
     """Return the directory used to persist user data."""
@@ -19,7 +21,6 @@ def _determine_data_dir(project_root: Path) -> Path:
         executable_dir = Path(sys.executable).resolve().parent
         return executable_dir / "user_data"
     return project_root / "user_data"
-
 
 class ShinyWindow(QtWidgets.QMainWindow):
     """Qt window embedding the running R Shiny budgeting app."""
