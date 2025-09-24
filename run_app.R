@@ -1,0 +1,13 @@
+#!/usr/bin/env Rscript
+
+required_packages <- c("shiny", "DT", "readr", "dplyr", "lubridate", "ggplot2", "scales")
+missing <- required_packages[!vapply(required_packages, requireNamespace, FUN.VALUE = logical(1), quietly = TRUE)]
+
+if (length(missing) > 0) {
+  message("The following packages need to be installed before running the app: ", paste(missing, collapse = ", "))
+  message("You can install them with:\ninstall.packages(c(\"", paste(missing, collapse = "\", \""), "\"))")
+  quit(status = 1)
+}
+
+message("Launching the Household Expense Tracker...")
+shiny::runApp(appDir = "app", launch.browser = TRUE)
