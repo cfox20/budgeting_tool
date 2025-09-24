@@ -11,7 +11,6 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .data_store import BudgetDataStore
 from .shiny_launcher import ShinyAppProcess
 
-
 def _determine_data_dir(project_root: Path) -> Path:
     """Return the directory used to persist user data."""
 
@@ -27,7 +26,6 @@ class ShinyWindow(QtWidgets.QMainWindow):
     def __init__(self, shiny_process: ShinyAppProcess) -> None:
         super().__init__()
         self._shiny_process = shiny_process
-
         self.setWindowTitle("Household Budgeting (R Shiny)")
         self.resize(1200, 800)
 
@@ -43,7 +41,6 @@ class ShinyWindow(QtWidgets.QMainWindow):
             self._shiny_process.stop()
         finally:
             super().closeEvent(event)
-
 
 def main() -> int:
     """Entry point executed by ``run_desktop.py`` and PyInstaller."""

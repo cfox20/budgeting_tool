@@ -41,6 +41,7 @@ class ShinyAppProcess:
             )
 
         data_dir = self.data_dir
+
         data_dir.mkdir(parents=True, exist_ok=True)
         log_path = data_dir / "shiny_app.log"
         self._log_handle = log_path.open("w", encoding="utf-8")
