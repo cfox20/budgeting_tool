@@ -11,6 +11,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 - **Budget planning** – capture multiple income sources, set monthly targets for each category, and track progress plus over/under budget categories in the reports tab.
 - **Desktop integration** – helper script can drop a ready-to-use desktop shortcut on Windows, macOS, or Linux (and will use your custom icon if you add one).
 
+
 ## Getting started
 
 1. **Install R** (version 4.0 or newer is recommended).
@@ -41,6 +42,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
    - **Linux** – creates an executable `budgeting-tool.desktop` entry. If `app/www/icon.png` is available it will be referenced; otherwise a generic system icon is used.
 
    Re-run the helper whenever you move the project folder so the shortcut points to the new location.
+
 
 ## Data files
 
@@ -79,6 +81,7 @@ base64 --decode /tmp/budgeting_tool_icon.b64 > app/www/icon.png
 ```
 
 Feel free to replace the resulting PNG with your own design; it will automatically be used by the UI and the shortcut helper when present.
+
 
 If either file does not exist yet, they will be created automatically after you add and save your first expense.
 

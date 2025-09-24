@@ -16,6 +16,7 @@ budget_path <- file.path(data_dir, "category_budget.csv")
 icon_path <- file.path("www", "icon.png")
 icon_available <- file.exists(icon_path)
 
+
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 }
@@ -124,6 +125,7 @@ coerce_value <- function(value, column_name) {
     return(parsed)
   }
   if (column_name %in% c("Amount", "Target")) {
+
     parsed <- suppressWarnings(as.numeric(value))
     if (is.na(parsed)) stop("Please supply a numeric amount.")
     return(parsed)
@@ -152,6 +154,7 @@ ui <- fluidPage(
       span("Household Expense Tracker")
     )
   ),
+
   tabsetPanel(
     id = "main_tabs",
     tabPanel(
@@ -360,7 +363,6 @@ server <- function(input, output, session) {
       showNotification(conditionMessage(e), type = "error")
     })
   })
-
   observeEvent(input$add_income, {
     source_name <- trimws(input$income_name)
     validate(
@@ -621,7 +623,6 @@ server <- function(input, output, session) {
       scale_y_continuous(labels = scales::dollar_format()) +
       theme_minimal(base_size = 14)
   })
-
   output$budget_progress_plot <- renderPlot({
     summary <- category_summary_data()
     progress <- summary %>%
@@ -691,7 +692,6 @@ server <- function(input, output, session) {
       formatCurrency(c("Total", "Target", "Remaining"), currency = "$", interval = 3, mark = ",", digits = 2) %>%
       formatPercentage("PercentOfTarget", digits = 1)
   })
-
   output$detailed_table <- renderDT({
     df <- filtered_expenses()
     validate(need(nrow(df) > 0, "No expenses match the selected range."))
