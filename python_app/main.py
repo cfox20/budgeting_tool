@@ -6,7 +6,6 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QUrl
-from PySide6.QtWebEngineCore import QtWebEngine
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from .data_store import BudgetDataStore
@@ -45,7 +44,6 @@ def main() -> int:
 
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
     app = QtWidgets.QApplication(sys.argv)
-    QtWebEngine.initialize()
 
     project_root = Path(__file__).resolve().parents[1]
     shiny_process: ShinyAppProcess | None = None
