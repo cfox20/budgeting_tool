@@ -25,6 +25,8 @@ def build() -> None:
         "BudgetingTool",
         "--add-data",
         f"{project_root / 'python_app'}{os.pathsep}python_app",
+        "--add-data",
+        f"{project_root / 'r_app'}{os.pathsep}r_app",
         str(project_root / "run_desktop.py"),
     ]
     print("Running", " ".join(cmd))
