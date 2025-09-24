@@ -11,6 +11,8 @@ library(scales)
 data_dir <- file.path("..", "data")
 expenses_path <- file.path(data_dir, "expenses.csv")
 backup_path <- file.path(data_dir, "expenses_backup.csv")
+income_path <- file.path(data_dir, "income_sources.csv")
+budget_path <- file.path(data_dir, "category_budget.csv")
 
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
@@ -24,6 +26,18 @@ empty_expenses <- data.frame(
   Category = character(),
   Amount = numeric(),
   Payer = character(),
+  stringsAsFactors = FALSE
+)
+
+empty_income_sources <- data.frame(
+  Source = character(),
+  Amount = numeric(),
+  stringsAsFactors = FALSE
+)
+
+empty_budget_targets <- data.frame(
+  Category = character(),
+  Target = numeric(),
   stringsAsFactors = FALSE
 )
 
@@ -53,6 +67,37 @@ load_expenses <- function() {
   }
 }
 
+load_income_sources <- function() {
+  if (file.exists(income_path)) {
+    readr::read_csv(
+      income_path,
+      col_types = cols(
+        Source = col_character(),
+        Amount = col_double()
+      ),
+      show_col_types = FALSE
+    )
+  } else {
+    empty_income_sources
+  }
+}
+
+load_budget_targets <- function() {
+  if (file.exists(budget_path)) {
+    readr::read_csv(
+      budget_path,
+      col_types = cols(
+        Category = col_character(),
+        Target = col_double()
+      ),
+      show_col_types = FALSE
+    )
+  } else {
+    empty_budget_targets
+  }
+}
+
+
 backup_preview <- function() {
   if (file.exists(backup_path)) {
     readr::read_csv(
@@ -77,7 +122,8 @@ coerce_value <- function(value, column_name) {
     if (is.na(parsed)) stop("Please supply a valid date (YYYY-MM-DD).")
     return(parsed)
   }
-  if (column_name == "Amount") {
+  if (column_name %in% c("Amount", "Target")) {
+
     parsed <- suppressWarnings(as.numeric(value))
     if (is.na(parsed)) stop("Please supply a numeric amount.")
     return(parsed)
@@ -128,6 +174,48 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
+      title = "Budget Planning",
+      fluidRow(
+        column(
+          width = 6,
+          h3("Monthly income"),
+          textInput("income_name", "Income source"),
+          numericInput("income_amount", "Monthly amount", value = NA, min = 0, step = 0.01),
+          actionButton("add_income", "Add income source", class = "btn-primary"),
+          br(),
+          DTOutput("income_table")
+        ),
+        column(
+          width = 6,
+          h3("Category targets"),
+          selectizeInput(
+            "budget_category",
+            "Category",
+            choices = default_categories,
+            options = list(create = TRUE, placeholder = "Select or type a category")
+          ),
+          numericInput("budget_amount", "Monthly target", value = NA, min = 0, step = 0.01),
+          actionButton("add_budget_target", "Set target", class = "btn-primary"),
+          br(),
+          DTOutput("budget_table")
+        )
+      ),
+      fluidRow(
+        column(
+          width = 12,
+          br(),
+          strong("Summary"),
+          textOutput("budget_summary"),
+          br(),
+          actionButton("save_budget_settings", "Save budget settings", class = "btn-success"),
+          br(),
+          br(),
+          verbatimTextOutput("budget_save_status")
+        )
+      )
+    ),
+    tabPanel(
+
       title = "Reports",
       fluidRow(
         column(
@@ -146,7 +234,10 @@ ui <- fluidPage(
           h3("Spending by category"),
           DTOutput("category_summary"),
           br(),
-          plotOutput("category_plot", height = "400px")
+          plotOutput("category_plot", height = "350px"),
+          br(),
+          h3("Progress against budget"),
+          plotOutput("budget_progress_plot", height = "350px")
         )
       ),
       fluidRow(
@@ -155,6 +246,19 @@ ui <- fluidPage(
           h3("Expense detail"),
           DTOutput("detailed_table")
         )
+      ),
+      fluidRow(
+        column(
+          width = 6,
+          h3("Over budget"),
+          DTOutput("over_budget_table")
+        ),
+        column(
+          width = 6,
+          h3("Under budget"),
+          DTOutput("under_budget_table")
+        )
+
       )
     )
   )
@@ -164,19 +268,30 @@ ui <- fluidPage(
 
 server <- function(input, output, session) {
   expenses_data <- reactiveVal(load_expenses())
+  income_data <- reactiveVal(load_income_sources())
+  budget_data <- reactiveVal(load_budget_targets())
 
   observe({
     df <- expenses_data()
+    budget_df <- budget_data()
+    category_choices <- sort(unique(c(default_categories, df$Category, budget_df$Category)))
     updateSelectizeInput(
       session,
       "category",
-      choices = sort(unique(c(default_categories, df$Category))),
+      choices = category_choices,
+
       server = TRUE
     )
     updateSelectizeInput(
       session,
       "payer",
       choices = sort(unique(c(default_payers, df$Payer))),
+      server = TRUE
+    )
+    updateSelectizeInput(
+      session,
+      "budget_category",
+      choices = category_choices,
       server = TRUE
     )
   })
@@ -230,6 +345,128 @@ server <- function(input, output, session) {
     }, error = function(e) {
       showNotification(conditionMessage(e), type = "error")
     })
+  })
+  observeEvent(input$add_income, {
+    source_name <- trimws(input$income_name)
+    validate(
+      need(nzchar(source_name), "Please provide a name for the income source."),
+      need(!is.null(input$income_amount) && !is.na(input$income_amount), "Please provide an amount.")
+    )
+
+    new_income <- data.frame(
+      Source = source_name,
+      Amount = as.numeric(input$income_amount),
+      stringsAsFactors = FALSE
+    )
+
+    updated <- dplyr::bind_rows(income_data(), new_income)
+    income_data(updated)
+
+    updateTextInput(session, "income_name", value = "")
+    updateNumericInput(session, "income_amount", value = NA)
+  })
+
+  output$income_table <- renderDT({
+    datatable(
+      income_data(),
+      editable = "cell",
+      rownames = FALSE,
+      options = list(pageLength = 5, lengthMenu = c(5, 10, 20))
+    ) %>%
+      formatCurrency("Amount", currency = "$", interval = 3, mark = ",", digits = 2)
+  })
+
+  observeEvent(input$income_table_cell_edit, {
+    info <- input$income_table_cell_edit
+    df <- income_data()
+    row <- info$row
+    col <- info$col + 1
+    column_name <- colnames(df)[col]
+
+    tryCatch({
+      df[row, column_name] <- coerce_value(info$value, column_name)
+      income_data(df)
+    }, error = function(e) {
+      showNotification(conditionMessage(e), type = "error")
+    })
+  })
+
+  observeEvent(input$add_budget_target, {
+    category <- trimws(input$budget_category)
+    validate(
+      need(nzchar(category), "Please choose a category."),
+      need(!is.null(input$budget_amount) && !is.na(input$budget_amount), "Please provide a target amount.")
+    )
+
+    amount <- as.numeric(input$budget_amount)
+    current <- budget_data()
+
+    if (category %in% current$Category) {
+      current$Target[current$Category == category] <- amount
+      updated <- current
+    } else {
+      updated <- dplyr::bind_rows(
+        current,
+        data.frame(Category = category, Target = amount, stringsAsFactors = FALSE)
+      )
+    }
+
+    updated <- dplyr::arrange(updated, Category)
+    budget_data(updated)
+
+    updateNumericInput(session, "budget_amount", value = NA)
+  })
+
+  output$budget_table <- renderDT({
+    datatable(
+      budget_data(),
+      editable = "cell",
+      rownames = FALSE,
+      options = list(pageLength = 10, lengthMenu = c(5, 10, 20))
+    ) %>%
+      formatCurrency("Target", currency = "$", interval = 3, mark = ",", digits = 2)
+  })
+
+  observeEvent(input$budget_table_cell_edit, {
+    info <- input$budget_table_cell_edit
+    df <- budget_data()
+    row <- info$row
+    col <- info$col + 1
+    column_name <- colnames(df)[col]
+
+    tryCatch({
+      df[row, column_name] <- coerce_value(info$value, column_name)
+      budget_data(df)
+    }, error = function(e) {
+      showNotification(conditionMessage(e), type = "error")
+    })
+  })
+
+  output$budget_summary <- renderText({
+    total_income <- sum(income_data()$Amount, na.rm = TRUE)
+    total_budget <- sum(budget_data()$Target, na.rm = TRUE)
+    remaining <- total_income - total_budget
+
+    paste0(
+      "Planned monthly income: ", scales::dollar(total_income),
+      " | Budgeted spending: ", scales::dollar(total_budget),
+      " | Remaining: ", scales::dollar(remaining)
+    )
+  })
+
+  observeEvent(input$save_budget_settings, {
+    dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
+
+    readr::write_csv(income_data(), income_path)
+    readr::write_csv(budget_data(), budget_path)
+
+    output$budget_save_status <- renderText({
+      paste(
+        "Saved", nrow(income_data()), "income source(s) to", normalizePath(income_path),
+        "and", nrow(budget_data()), "budget target(s) to", normalizePath(budget_path)
+      )
+    })
+    showNotification("Budget settings saved successfully.", type = "message")
   })
 
   save_preview_backup <- eventReactive(input$save_expenses, {
@@ -334,7 +571,12 @@ server <- function(input, output, session) {
         Transactions = dplyr::n()
       ) %>%
       dplyr::arrange(dplyr::desc(Total)) %>%
-      dplyr::mutate(Percentage = Total / sum(Total))
+      dplyr::mutate(Percentage = Total / sum(Total)) %>%
+      dplyr::left_join(budget_data(), by = "Category") %>%
+      dplyr::mutate(
+        Variance = ifelse(is.na(Target), NA_real_, Total - Target),
+        PercentOfTarget = ifelse(!is.na(Target) & Target > 0, Total / Target, NA_real_)
+      )
     summary
   })
 
@@ -347,7 +589,10 @@ server <- function(input, output, session) {
       options = list(dom = "ft", pageLength = 10)
     ) %>%
       formatCurrency("Total", currency = "$", interval = 3, mark = ",", digits = 2) %>%
-      formatPercentage("Percentage", digits = 1)
+      formatCurrency("Target", currency = "$", interval = 3, mark = ",", digits = 2) %>%
+      formatCurrency("Variance", currency = "$", interval = 3, mark = ",", digits = 2) %>%
+      formatPercentage("Percentage", digits = 1) %>%
+      formatPercentage("PercentOfTarget", digits = 1)
   })
 
   output$category_plot <- renderPlot({
@@ -361,7 +606,75 @@ server <- function(input, output, session) {
       scale_y_continuous(labels = scales::dollar_format()) +
       theme_minimal(base_size = 14)
   })
+  output$budget_progress_plot <- renderPlot({
+    summary <- category_summary_data()
+    progress <- summary %>%
+      dplyr::filter(!is.na(Target) & Target > 0)
 
+    validate(need(nrow(progress) > 0, "Add budget targets to see progress."))
+
+    ggplot(progress, aes(x = reorder(Category, PercentOfTarget), y = PercentOfTarget)) +
+      geom_col(fill = "#7570b3") +
+      geom_hline(yintercept = 1, linetype = "dashed", color = "#d95f02") +
+      coord_flip() +
+      labs(
+        x = "Category",
+        y = "Spent vs. target",
+        title = "Spending progress relative to budget"
+      ) +
+      scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+      theme_minimal(base_size = 14)
+  })
+
+  over_budget_data <- reactive({
+    category_summary_data() %>%
+      dplyr::filter(!is.na(Variance) & Variance > 0) %>%
+      dplyr::transmute(
+        Category,
+        Total,
+        Target,
+        OverBy = Variance,
+        PercentOfTarget
+      ) %>%
+      dplyr::arrange(dplyr::desc(OverBy))
+  })
+
+  under_budget_data <- reactive({
+    category_summary_data() %>%
+      dplyr::filter(!is.na(Variance) & Variance < 0) %>%
+      dplyr::transmute(
+        Category,
+        Total,
+        Target,
+        Remaining = Target - Total,
+        PercentOfTarget
+      ) %>%
+      dplyr::arrange(dplyr::desc(Remaining))
+  })
+
+  output$over_budget_table <- renderDT({
+    df <- over_budget_data()
+    validate(need(nrow(df) > 0, "No categories have exceeded their targets."))
+    datatable(
+      df,
+      rownames = FALSE,
+      options = list(pageLength = 10, dom = "ft")
+    ) %>%
+      formatCurrency(c("Total", "Target", "OverBy"), currency = "$", interval = 3, mark = ",", digits = 2) %>%
+      formatPercentage("PercentOfTarget", digits = 1)
+  })
+
+  output$under_budget_table <- renderDT({
+    df <- under_budget_data()
+    validate(need(nrow(df) > 0, "No categories are currently under budget."))
+    datatable(
+      df,
+      rownames = FALSE,
+      options = list(pageLength = 10, dom = "ft")
+    ) %>%
+      formatCurrency(c("Total", "Target", "Remaining"), currency = "$", interval = 3, mark = ",", digits = 2) %>%
+      formatPercentage("PercentOfTarget", digits = 1)
+  })
   output$detailed_table <- renderDT({
     df <- filtered_expenses()
     validate(need(nrow(df) > 0, "No expenses match the selected range."))
