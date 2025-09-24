@@ -1,0 +1,6 @@
+data/expenses.csv
+data/expenses_backup.csv
+app/www/
+.Rhistory
+.RData
+.Rproj.user/
