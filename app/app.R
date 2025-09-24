@@ -13,6 +13,9 @@ expenses_path <- file.path(data_dir, "expenses.csv")
 backup_path <- file.path(data_dir, "expenses_backup.csv")
 income_path <- file.path(data_dir, "income_sources.csv")
 budget_path <- file.path(data_dir, "category_budget.csv")
+icon_path <- file.path("www", "icon.png")
+icon_available <- file.exists(icon_path)
+
 
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
@@ -97,7 +100,6 @@ load_budget_targets <- function() {
   }
 }
 
-
 backup_preview <- function() {
   if (file.exists(backup_path)) {
     readr::read_csv(
@@ -134,7 +136,25 @@ coerce_value <- function(value, column_name) {
 # UI ------------------------------------------------------------------------
 
 ui <- fluidPage(
-  titlePanel("Household Expense Tracker"),
+  tags$head(
+    if (icon_available) {
+      list(
+        tags$link(rel = "icon", type = "image/png", href = "icon.png"),
+        tags$link(rel = "apple-touch-icon", href = "icon.png")
+      )
+    },
+    tags$meta(name = "theme-color", content = "#1C3F60")
+  ),
+  titlePanel(
+    div(
+      style = "display:flex;align-items:center;gap:12px;flex-wrap:wrap;",
+      if (icon_available) {
+        tags$img(src = "icon.png", height = 60, alt = "Budgeting Tool icon")
+      },
+      span("Household Expense Tracker")
+    )
+  ),
+
   tabsetPanel(
     id = "main_tabs",
     tabPanel(
@@ -215,7 +235,6 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
-
       title = "Reports",
       fluidRow(
         column(
@@ -258,7 +277,6 @@ ui <- fluidPage(
           h3("Under budget"),
           DTOutput("under_budget_table")
         )
-
       )
     )
   )
@@ -279,7 +297,6 @@ server <- function(input, output, session) {
       session,
       "category",
       choices = category_choices,
-
       server = TRUE
     )
     updateSelectizeInput(
