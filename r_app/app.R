@@ -23,6 +23,8 @@ data_dir <- resolve_data_dir()
 if (!dir.exists(data_dir)) {
   dir.create(data_dir, recursive = TRUE, showWarnings = FALSE)
 }
+message("Using budgeting data directory: ", data_dir)
+
 
 paths <- list(
   expenses = file.path(data_dir, "expenses.csv"),
@@ -42,6 +44,27 @@ empty_expenses <- tibble(
 
 empty_income <- tibble(source = character(), amount = double())
 empty_budget <- tibble(category = character(), target_amount = double())
+
+safe_read <- function(path, col_types, empty_frame, transform) {
+  if (!file.exists(path)) {
+    return(empty_frame)
+  }
+  tryCatch(
+    {
+      df <- readr::read_csv(
+        path,
+        col_types = col_types,
+        show_col_types = FALSE,
+        progress = FALSE
+      )
+      transform(df)
+    },
+    error = function(err) {
+      warning(sprintf("Failed to read %s: %s", basename(path), conditionMessage(err)))
+      empty_frame
+    }
+  )
+}
 
 prepare_expenses <- function(df) {
   df <- df %>%
@@ -78,27 +101,61 @@ prepare_numeric_frame <- function(df, name_col, amount_col) {
 }
 
 read_expenses <- function() {
-  if (!file.exists(paths$expenses)) return(empty_expenses)
-  readr::read_csv(paths$expenses, show_col_types = FALSE, progress = FALSE) %>%
-    bind_rows(empty_expenses) %>%
-    select(all_of(names(empty_expenses))) %>%
-    prepare_expenses()
+  safe_read(
+    paths$expenses,
+    col_types = cols(
+      date = col_character(),
+      description = col_character(),
+      category = col_character(),
+      amount = col_double(),
+      payer = col_character(),
+      account = col_character(),
+      .default = col_guess()
+    ),
+    empty_expenses,
+    function(df) {
+      df %>%
+        bind_rows(empty_expenses) %>%
+        select(all_of(names(empty_expenses))) %>%
+        prepare_expenses()
+    }
+  )
 }
 
 read_income <- function() {
-  if (!file.exists(paths$income)) return(empty_income)
-  readr::read_csv(paths$income, show_col_types = FALSE, progress = FALSE) %>%
-    bind_rows(empty_income) %>%
-    select(all_of(names(empty_income))) %>%
-    prepare_numeric_frame("source", "amount")
+  safe_read(
+    paths$income,
+    col_types = cols(
+      source = col_character(),
+      amount = col_double(),
+      .default = col_guess()
+    ),
+    empty_income,
+    function(df) {
+      df %>%
+        bind_rows(empty_income) %>%
+        select(all_of(names(empty_income))) %>%
+        prepare_numeric_frame("source", "amount")
+    }
+  )
 }
 
 read_budget <- function() {
-  if (!file.exists(paths$budget)) return(empty_budget)
-  readr::read_csv(paths$budget, show_col_types = FALSE, progress = FALSE) %>%
-    bind_rows(empty_budget) %>%
-    select(all_of(names(empty_budget))) %>%
-    prepare_numeric_frame("category", "target_amount")
+  safe_read(
+    paths$budget,
+    col_types = cols(
+      category = col_character(),
+      target_amount = col_double(),
+      .default = col_guess()
+    ),
+    empty_budget,
+    function(df) {
+      df %>%
+        bind_rows(empty_budget) %>%
+        select(all_of(names(empty_budget))) %>%
+        prepare_numeric_frame("category", "target_amount")
+    }
+  )
 }
 
 write_expenses <- function(df) {

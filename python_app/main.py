@@ -14,11 +14,13 @@ from .shiny_launcher import ShinyAppProcess
 def _determine_data_dir(project_root: Path) -> Path:
     """Return the directory used to persist user data."""
 
+def _determine_data_dir(project_root: Path) -> Path:
+    """Return the directory used to persist user data."""
+
     if getattr(sys, "frozen", False):
         executable_dir = Path(sys.executable).resolve().parent
         return executable_dir / "user_data"
     return project_root / "user_data"
-
 
 class ShinyWindow(QtWidgets.QMainWindow):
     """Qt window embedding the running R Shiny budgeting app."""
@@ -26,12 +28,30 @@ class ShinyWindow(QtWidgets.QMainWindow):
     def __init__(self, shiny_process: ShinyAppProcess) -> None:
         super().__init__()
         self._shiny_process = shiny_process
+
         self.setWindowTitle("Household Budgeting (R Shiny)")
         self.resize(1200, 800)
 
-        view = QWebEngineView(self)
-        view.setUrl(QUrl(shiny_process.url))
-        self.setCentralWidget(view)
+        self._view = QWebEngineView(self)
+        self._view.loadFinished.connect(self._handle_load_finished)
+        self._view.setUrl(QUrl.fromUserInput(f"{shiny_process.url}/"))
+        self.setCentralWidget(self._view)
+
+    # ------------------------------------------------------------------
+    def _handle_load_finished(self, ok: bool) -> None:
+        """Surface connection failures from the embedded web view."""
+
+        if ok:
+            return
+
+        QtWidgets.QMessageBox.warning(
+            self,
+            "Unable to display budgeting app",
+            (
+                "The embedded browser could not load the Shiny interface.\n"
+                "Check 'user_data/shiny_app.log' for errors and ensure R is installed."
+            ),
+        )
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
@@ -41,6 +61,7 @@ class ShinyWindow(QtWidgets.QMainWindow):
             self._shiny_process.stop()
         finally:
             super().closeEvent(event)
+
 
 def main() -> int:
     """Entry point executed by ``run_desktop.py`` and PyInstaller."""

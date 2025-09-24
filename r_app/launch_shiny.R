@@ -4,6 +4,11 @@ if (is.na(port) || port <= 0) {
   port <- 0L
 }
 
+data_dir_arg <- if (length(args) >= 2) args[[2]] else NA_character_
+if (!is.na(data_dir_arg) && nzchar(data_dir_arg)) {
+  Sys.setenv(R_SHINY_BUDGET_DATA_DIR = data_dir_arg)
+}
+
 required_packages <- c(
   "shiny",
   "shinythemes",

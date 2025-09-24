@@ -41,16 +41,15 @@ class ShinyAppProcess:
             )
 
         data_dir = self.data_dir
-
         data_dir.mkdir(parents=True, exist_ok=True)
         log_path = data_dir / "shiny_app.log"
         self._log_handle = log_path.open("w", encoding="utf-8")
 
         env = os.environ.copy()
-        env.setdefault("R_SHINY_BUDGET_DATA_DIR", str(data_dir))
-        env.setdefault("R_SHINY_APP_ROOT", str(self.project_root / "r_app"))
+        env["R_SHINY_BUDGET_DATA_DIR"] = str(data_dir)
+        env["R_SHINY_APP_ROOT"] = str(self.project_root / "r_app")
 
-        args = [rscript, str(launch_script), str(self.port)]
+        args = [rscript, str(launch_script), str(self.port), str(data_dir)]
         try:
             self._process = subprocess.Popen(
                 args,
