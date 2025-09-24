@@ -11,6 +11,14 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .data_store import BudgetDataStore
 from .shiny_launcher import ShinyAppProcess
 
+def _determine_data_dir(project_root: Path) -> Path:
+    """Return the directory used to persist user data."""
+
+    if getattr(sys, "frozen", False):
+        executable_dir = Path(sys.executable).resolve().parent
+        return executable_dir / "user_data"
+    return project_root / "user_data"
+
 
 class ShinyWindow(QtWidgets.QMainWindow):
     """Qt window embedding the running R Shiny budgeting app."""
@@ -18,7 +26,6 @@ class ShinyWindow(QtWidgets.QMainWindow):
     def __init__(self, shiny_process: ShinyAppProcess) -> None:
         super().__init__()
         self._shiny_process = shiny_process
-
         self.setWindowTitle("Household Budgeting (R Shiny)")
         self.resize(1200, 800)
 
@@ -35,21 +42,22 @@ class ShinyWindow(QtWidgets.QMainWindow):
         finally:
             super().closeEvent(event)
 
-
 def main() -> int:
     """Entry point executed by ``run_desktop.py`` and PyInstaller."""
 
+    project_root = Path(__file__).resolve().parents[1]
+    data_dir = _determine_data_dir(project_root)
+
     # Prepare the data directory and seed files before the R app boots.
-    BudgetDataStore()
+    BudgetDataStore(base_dir=data_dir)
 
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
     app = QtWidgets.QApplication(sys.argv)
 
-    project_root = Path(__file__).resolve().parents[1]
     shiny_process: ShinyAppProcess | None = None
 
     try:
-        shiny_process = ShinyAppProcess(project_root)
+        shiny_process = ShinyAppProcess(project_root, data_dir=data_dir)
         shiny_process.start()
         shiny_process.wait_until_ready()
     except Exception as exc:  # pragma: no cover - GUI error dialog

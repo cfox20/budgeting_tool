@@ -15,10 +15,16 @@ from urllib import error, request
 class ShinyAppProcess:
     """Launch and manage the lifetime of the R Shiny budgeting application."""
 
-    def __init__(self, project_root: Path, port: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        port: Optional[int] = None,
+        data_dir: Optional[Path] = None,
+    ) -> None:
         self.project_root = project_root
         self.port = port or self._find_free_port()
         self.url = f"http://127.0.0.1:{self.port}"
+        self.data_dir = Path(data_dir) if data_dir is not None else project_root / "user_data"
 
         self._process: subprocess.Popen[str] | None = None
         self._log_handle: Optional[TextIO] = None
@@ -34,7 +40,8 @@ class ShinyAppProcess:
                 "The R launcher script is missing. Expected to find 'r_app/launch_shiny.R'."
             )
 
-        data_dir = self.project_root / "user_data"
+        data_dir = self.data_dir
+
         data_dir.mkdir(parents=True, exist_ok=True)
         log_path = data_dir / "shiny_app.log"
         self._log_handle = log_path.open("w", encoding="utf-8")
