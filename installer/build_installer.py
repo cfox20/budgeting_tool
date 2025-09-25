@@ -17,6 +17,8 @@ def build() -> None:
         spec_path.unlink()
 
     env = os.environ.copy()
+    dist_root = project_root / "installer" / "dist"
+    build_root = project_root / "installer" / "build"
     cmd = [
         sys.executable,
         "-m",
@@ -24,6 +26,10 @@ def build() -> None:
         "--noconfirm",
         "--clean",
         "--windowed",
+        "--distpath",
+        str(dist_root),
+        "--workpath",
+        str(build_root),
         "--name",
         "BudgetingTool",
         "--add-data",
@@ -35,10 +41,12 @@ def build() -> None:
     print("Running", " ".join(cmd))
     subprocess.check_call(cmd, env=env)
 
-    dist_root = project_root / "dist"
     bundle_dir = dist_root / "BudgetingTool"
     if not bundle_dir.exists():
-        print("PyInstaller completed but the expected dist/BudgetingTool folder was not found.")
+        print(
+            "PyInstaller completed but the expected installer/dist/BudgetingTool folder was not found."
+        )
+
         return
 
     archive_suffix = platform.system().lower()
@@ -56,7 +64,9 @@ def build() -> None:
 if __name__ == "__main__":
     try:
         build()
-        print("Installer build complete. Check the dist/ directory for the executable bundle.")
+        print(
+            "Installer build complete. Check the installer/dist/ directory for the executable bundle."
+        )
     except FileNotFoundError as exc:
         raise SystemExit(
             "PyInstaller is required. Install it with 'pip install pyinstaller' before running this script."

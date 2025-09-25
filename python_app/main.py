@@ -1,6 +1,7 @@
 """Launch the budgeting R Shiny application inside a desktop window."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,13 +15,33 @@ from .shiny_launcher import ShinyAppProcess
 def _determine_data_dir(project_root: Path) -> Path:
     """Return the directory used to persist user data."""
 
+def _platform_user_data_dir(app_name: str) -> Path:
+    """Return a user-writable data directory for the current platform."""
+
+    if sys.platform.startswith("win"):
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base is None:
+            base = Path.home() / "AppData" / "Local"
+        return Path(base) / app_name
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / app_name
+
+    # Linux and everything else follows the XDG Base Directory spec.
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+    return base / app_name
+
+
 def _determine_data_dir(project_root: Path) -> Path:
     """Return the directory used to persist user data."""
 
     if getattr(sys, "frozen", False):
-        executable_dir = Path(sys.executable).resolve().parent
-        return executable_dir / "user_data"
+        return _platform_user_data_dir("Budgeting Tool")
     return project_root / "user_data"
+
+    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
+    app = QtWidgets.QApplication(sys.argv)
 
 class ShinyWindow(QtWidgets.QMainWindow):
     """Qt window embedding the running R Shiny budgeting app."""
@@ -44,14 +65,18 @@ class ShinyWindow(QtWidgets.QMainWindow):
         if ok:
             return
 
+        log_path = self._shiny_process.data_dir / "shiny_app.log"
         QtWidgets.QMessageBox.warning(
             self,
             "Unable to display budgeting app",
             (
                 "The embedded browser could not load the Shiny interface.\n"
-                "Check 'user_data/shiny_app.log' for errors and ensure R is installed."
+                f"Check '{log_path}' for errors and ensure R is installed."
             ),
         )
+        if shiny_process is not None:
+            shiny_process.stop()
+        return 1
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
@@ -82,10 +107,11 @@ def main() -> int:
         shiny_process.start()
         shiny_process.wait_until_ready()
     except Exception as exc:  # pragma: no cover - GUI error dialog
+        log_path = data_dir / "shiny_app.log"
         QtWidgets.QMessageBox.critical(
             None,
             "Failed to start budgeting app",
-            f"{exc}\n\nCheck 'user_data/shiny_app.log' for detailed logs.",
+            f"{exc}\n\nCheck '{log_path}' for detailed logs.",
         )
         if shiny_process is not None:
             shiny_process.stop()

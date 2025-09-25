@@ -85,9 +85,10 @@ class ShinyAppProcess:
             except error.URLError:
                 time.sleep(0.5)
 
+        log_path = self.data_dir / "shiny_app.log"
         raise TimeoutError(
             "Timed out waiting for the R Shiny app to start. "
-            "Review 'user_data/shiny_app.log' for details."
+            f"Review '{log_path}' for details."
         )
 
     # ------------------------------------------------------------------

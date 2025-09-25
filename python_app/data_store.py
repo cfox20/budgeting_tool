@@ -12,13 +12,14 @@ EXPENSE_COLUMNS = [
     "date",
     "description",
     "category",
+    "subcategory",
     "amount",
     "payer",
     "account",
 ]
 
 INCOME_COLUMNS = ["source", "amount"]
-BUDGET_COLUMNS = ["category", "target_amount"]
+BUDGET_COLUMNS = ["category", "subcategory", "target_amount"]
 
 
 @dataclass
@@ -107,6 +108,7 @@ class BudgetDataStore:
         frame["date"] = dates.dt.date.astype(str)
         frame["description"] = frame["description"].fillna("").astype(str)
         frame["category"] = frame["category"].fillna("").astype(str)
+        frame["subcategory"] = frame["subcategory"].fillna("").astype(str)
         frame["payer"] = frame["payer"].fillna("").astype(str)
         frame["account"] = frame["account"].fillna("").astype(str)
         frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0)
@@ -120,7 +122,10 @@ class BudgetDataStore:
             if column not in frame.columns:
                 frame[column] = "" if column != amount_field else 0.0
         frame = frame[columns]
-        frame[columns[0]] = frame[columns[0]].fillna("").astype(str)
+        for column in columns:
+            if column == amount_field:
+                continue
+            frame[column] = frame[column].fillna("").astype(str)
         frame[amount_field] = pd.to_numeric(
             frame[amount_field], errors="coerce"
         ).fillna(0.0)
@@ -140,6 +145,7 @@ class BudgetDataStore:
                 "date": "2024-03-01",
                 "description": "Rent",
                 "category": "Housing",
+                "subcategory": "Rent",
                 "amount": 2150.0,
                 "payer": "Alex",
                 "account": "Checking",
@@ -148,6 +154,7 @@ class BudgetDataStore:
                 "date": "2024-03-02",
                 "description": "Groceries",
                 "category": "Food",
+                "subcategory": "Groceries",
                 "amount": 235.42,
                 "payer": "Sam",
                 "account": "Credit Card",
@@ -156,6 +163,7 @@ class BudgetDataStore:
                 "date": "2024-03-03",
                 "description": "Auto insurance",
                 "category": "Transportation",
+                "subcategory": "Insurance",
                 "amount": 165.73,
                 "payer": "Alex",
                 "account": "Checking",
@@ -164,6 +172,7 @@ class BudgetDataStore:
                 "date": "2024-03-05",
                 "description": "Dinner out",
                 "category": "Dining",
+                "subcategory": "Restaurants",
                 "amount": 86.15,
                 "payer": "Sam",
                 "account": "Credit Card",
@@ -172,6 +181,7 @@ class BudgetDataStore:
                 "date": "2024-03-07",
                 "description": "Internet",
                 "category": "Utilities",
+                "subcategory": "Internet",
                 "amount": 78.0,
                 "payer": "Alex",
                 "account": "Checking",
@@ -180,6 +190,7 @@ class BudgetDataStore:
                 "date": "2024-03-09",
                 "description": "Gasoline",
                 "category": "Transportation",
+                "subcategory": "Fuel",
                 "amount": 94.32,
                 "payer": "Sam",
                 "account": "Debit Card",
@@ -188,6 +199,7 @@ class BudgetDataStore:
                 "date": "2024-03-11",
                 "description": "Movie night",
                 "category": "Entertainment",
+                "subcategory": "Outings",
                 "amount": 38.5,
                 "payer": "Alex",
                 "account": "Credit Card",
@@ -196,6 +208,7 @@ class BudgetDataStore:
                 "date": "2024-03-14",
                 "description": "Dog food",
                 "category": "Pets",
+                "subcategory": "Pet supplies",
                 "amount": 52.16,
                 "payer": "Sam",
                 "account": "Credit Card",
@@ -204,6 +217,7 @@ class BudgetDataStore:
                 "date": "2024-03-16",
                 "description": "Student loan",
                 "category": "Debt",
+                "subcategory": "Student loan",
                 "amount": 410.0,
                 "payer": "Alex",
                 "account": "Checking",
@@ -212,6 +226,7 @@ class BudgetDataStore:
                 "date": "2024-03-21",
                 "description": "Groceries",
                 "category": "Food",
+                "subcategory": "Groceries",
                 "amount": 189.77,
                 "payer": "Sam",
                 "account": "Credit Card",
@@ -220,6 +235,7 @@ class BudgetDataStore:
                 "date": "2024-03-24",
                 "description": "Gym membership",
                 "category": "Health",
+                "subcategory": "Fitness",
                 "amount": 72.0,
                 "payer": "Alex",
                 "account": "Debit Card",
@@ -228,6 +244,7 @@ class BudgetDataStore:
                 "date": "2024-03-28",
                 "description": "Electric bill",
                 "category": "Utilities",
+                "subcategory": "Electric",
                 "amount": 134.88,
                 "payer": "Alex",
                 "account": "Checking",
@@ -236,6 +253,7 @@ class BudgetDataStore:
                 "date": "2024-03-30",
                 "description": "Charitable donation",
                 "category": "Giving",
+                "subcategory": "Charity",
                 "amount": 120.0,
                 "payer": "Sam",
                 "account": "Checking",
@@ -259,17 +277,31 @@ class BudgetDataStore:
     def _write_default_category_budget(self) -> None:
         sample = pd.DataFrame(
             [
-                {"category": "Housing", "target_amount": 2200.0},
-                {"category": "Food", "target_amount": 650.0},
-                {"category": "Transportation", "target_amount": 450.0},
-                {"category": "Utilities", "target_amount": 320.0},
-                {"category": "Dining", "target_amount": 200.0},
-                {"category": "Entertainment", "target_amount": 180.0},
-                {"category": "Health", "target_amount": 160.0},
-                {"category": "Giving", "target_amount": 150.0},
-                {"category": "Pets", "target_amount": 90.0},
-                {"category": "Debt", "target_amount": 450.0},
-                {"category": "Savings", "target_amount": 1000.0},
+                {"category": "Housing", "subcategory": "Rent", "target_amount": 2200.0},
+                {"category": "Food", "subcategory": "Groceries", "target_amount": 500.0},
+                {"category": "Food", "subcategory": "Dining out", "target_amount": 180.0},
+                {
+                    "category": "Transportation",
+                    "subcategory": "Fuel",
+                    "target_amount": 160.0,
+                },
+                {
+                    "category": "Transportation",
+                    "subcategory": "Insurance",
+                    "target_amount": 150.0,
+                },
+                {"category": "Utilities", "subcategory": "Electric", "target_amount": 120.0},
+                {"category": "Utilities", "subcategory": "Internet", "target_amount": 80.0},
+                {"category": "Utilities", "subcategory": "Water", "target_amount": 60.0},
+                {"category": "Dining", "subcategory": "Restaurants", "target_amount": 200.0},
+                {"category": "Entertainment", "subcategory": "Outings", "target_amount": 120.0},
+                {"category": "Entertainment", "subcategory": "Streaming", "target_amount": 60.0},
+                {"category": "Health", "subcategory": "Fitness", "target_amount": 75.0},
+                {"category": "Giving", "subcategory": "Charity", "target_amount": 150.0},
+                {"category": "Pets", "subcategory": "Pet supplies", "target_amount": 90.0},
+                {"category": "Debt", "subcategory": "Student loan", "target_amount": 410.0},
+                {"category": "Savings", "subcategory": "Emergency fund", "target_amount": 600.0},
+                {"category": "Savings", "subcategory": "Retirement", "target_amount": 400.0},
             ],
             columns=BUDGET_COLUMNS,
         )

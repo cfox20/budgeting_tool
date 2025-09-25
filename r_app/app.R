@@ -36,13 +36,16 @@ empty_expenses <- tibble(
   date = character(),
   description = character(),
   category = character(),
+  subcategory = character(),
+
   amount = double(),
   payer = character(),
   account = character()
 )
 
 empty_income <- tibble(source = character(), amount = double())
-empty_budget <- tibble(category = character(), target_amount = double())
+empty_budget <- tibble(category = character(), subcategory = character(), target_amount = double())
+
 
 safe_read <- function(path, col_types, empty_frame, transform) {
   if (!file.exists(path)) {
@@ -73,6 +76,7 @@ prepare_expenses <- function(df) {
       date = format(date, "%Y-%m-%d"),
       description = replace_na(trimws(as.character(description)), ""),
       category = replace_na(trimws(as.character(category)), ""),
+      subcategory = replace_na(trimws(as.character(subcategory)), ""),
       payer = replace_na(trimws(as.character(payer)), ""),
       account = replace_na(trimws(as.character(account)), ""),
       amount = replace_na(as.numeric(amount), 0)
@@ -99,6 +103,21 @@ prepare_numeric_frame <- function(df, name_col, amount_col) {
   df %>% select(all_of(c(name_col, amount_col)))
 }
 
+prepare_budget_frame <- function(df) {
+  df <- df %>%
+    mutate(
+      category = replace_na(trimws(as.character(category)), ""),
+      subcategory = replace_na(trimws(as.character(subcategory)), ""),
+      target_amount = replace_na(as.numeric(target_amount), 0)
+    )
+  for (col in names(empty_budget)) {
+    if (!col %in% names(df)) {
+      df[[col]] <- empty_budget[[col]]
+    }
+  }
+  df %>% select(all_of(names(empty_budget)))
+}
+
 read_expenses <- function() {
   safe_read(
     paths$expenses,
@@ -106,6 +125,7 @@ read_expenses <- function() {
       date = col_character(),
       description = col_character(),
       category = col_character(),
+      subcategory = col_character(),
       amount = col_double(),
       payer = col_character(),
       account = col_character(),
@@ -139,20 +159,21 @@ read_income <- function() {
   )
 }
 
-read_budget <- function() {
-  safe_read(
-    paths$budget,
-    col_types = cols(
-      category = col_character(),
-      target_amount = col_double(),
-      .default = col_guess()
-    ),
-    empty_budget,
-    function(df) {
+  read_budget <- function() {
+    safe_read(
+      paths$budget,
+      col_types = cols(
+        category = col_character(),
+        subcategory = col_character(),
+        target_amount = col_double(),
+        .default = col_guess()
+      ),
+      empty_budget,
+      function(df) {
       df %>%
         bind_rows(empty_budget) %>%
         select(all_of(names(empty_budget))) %>%
-        prepare_numeric_frame("category", "target_amount")
+        prepare_budget_frame()
     }
   )
 }
@@ -171,7 +192,7 @@ write_income <- function(df) {
 }
 
 write_budget <- function(df) {
-  df <- prepare_numeric_frame(df, "category", "target_amount")
+  df <- prepare_budget_frame(df)
   readr::write_csv(df, paths$budget, progress = FALSE)
 }
 
@@ -181,21 +202,38 @@ clean_choices <- function(values) {
 }
 
 category_summary <- function(expenses, budgets) {
-  if (!nrow(expenses)) {
-    return(tibble(category = character(), spent = double(), target_amount = double(), difference = double()))
-  }
-  summary <- expenses %>%
+  budget_totals <- budgets %>%
+    mutate(target_amount = replace_na(target_amount, 0)) %>%
+    group_by(category, subcategory) %>%
+    summarise(target_amount = sum(target_amount, na.rm = TRUE), .groups = "drop")
+
+  expense_totals <- expenses %>%
     mutate(date = ymd(date, quiet = TRUE)) %>%
     filter(!is.na(date)) %>%
-    group_by(category) %>%
-    summarise(spent = sum(amount, na.rm = TRUE), .groups = "drop") %>%
-    full_join(budgets, by = "category") %>%
+    group_by(category, subcategory) %>%
+    summarise(spent = sum(amount, na.rm = TRUE), .groups = "drop")
+
+  summary <- full_join(expense_totals, budget_totals, by = c("category", "subcategory")) %>%
     mutate(
+      category = replace_na(category, ""),
+      subcategory = replace_na(subcategory, ""),
       target_amount = replace_na(target_amount, 0),
       spent = replace_na(spent, 0),
-      difference = spent - target_amount
+      difference = spent - target_amount,
+      percent_used = if_else(target_amount > 0, (spent / target_amount) * 100, NA_real_)
     ) %>%
     arrange(desc(spent))
+
+  if (!nrow(summary)) {
+    summary <- tibble(
+      category = character(),
+      subcategory = character(),
+      spent = double(),
+      target_amount = double(),
+      difference = double(),
+      percent_used = double()
+    )
+  }
   summary
 }
 
@@ -215,6 +253,12 @@ ui <- navbarPage(
         selectizeInput(
           "expense_category",
           "Category",
+          choices = NULL,
+          options = list(create = TRUE, persist = TRUE)
+        ),
+        selectizeInput(
+          "expense_subcategory",
+          "Sub-category",
           choices = NULL,
           options = list(create = TRUE, persist = TRUE)
         ),
@@ -260,7 +304,7 @@ ui <- navbarPage(
       column(
         width = 6,
         h3("Category targets"),
-        p("Set monthly targets for each spending category."),
+        p("Set monthly targets for each spending category and sub-category."),
         actionButton("add_budget", "Add budget row"),
         actionButton("delete_budget", "Delete selected"),
         actionButton("save_budget", "Save targets", class = "btn-success"),
@@ -285,6 +329,18 @@ ui <- navbarPage(
       column(
         width = 8,
         plotOutput("spending_plot", height = 320)
+      )
+    ),
+    fluidRow(
+      column(
+        width = 6,
+        h4("Budget progress"),
+        plotOutput("budget_progress_plot", height = 320)
+      ),
+      column(
+        width = 6,
+        h4("Spending trend"),
+        plotOutput("category_trend_plot", height = 320)
       )
     ),
     fluidRow(
@@ -320,6 +376,23 @@ server <- function(input, output, session) {
     cats <- clean_choices(c(expenses()[["category"]], budgets()[["category"]]))
     updateSelectizeInput(session, "expense_category", choices = cats, server = TRUE)
 
+    subcat_choices <- bind_rows(
+      expenses() %>% select(category, subcategory),
+      budgets() %>% select(category, subcategory)
+    ) %>%
+      mutate(
+        category = replace_na(category, ""),
+        subcategory = replace_na(subcategory, "")
+      )
+
+    selected_category <- input$expense_category
+    if (!is.null(selected_category) && nzchar(selected_category)) {
+      subcat_choices <- subcat_choices %>% filter(category == selected_category)
+    }
+    subs <- clean_choices(subcat_choices$subcategory)
+    updateSelectizeInput(session, "expense_subcategory", choices = subs, server = TRUE)
+
+
     payers <- clean_choices(expenses()[["payer"]])
     updateSelectizeInput(session, "expense_payer", choices = payers, server = TRUE)
 
@@ -336,6 +409,7 @@ server <- function(input, output, session) {
       date = as.character(input$expense_date),
       description = trimws(input$expense_description),
       category = trimws(input$expense_category),
+      subcategory = trimws(input$expense_subcategory),
       amount = round(as.numeric(amount_value), 2),
       payer = trimws(input$expense_payer),
       account = trimws(input$expense_account)
@@ -352,7 +426,8 @@ server <- function(input, output, session) {
     if (length(selected)) {
       df <- expenses()
       df <- df[-selected, , drop = FALSE]
-      expenses(df)
+      expenses(prepare_expenses(df))
+
     }
   })
 
@@ -421,7 +496,8 @@ server <- function(input, output, session) {
       selection = "single",
       editable = "cell",
       rownames = FALSE,
-      options = list(pageLength = 10, scrollX = TRUE)
+      options = list(pageLength = 10, scrollX = TRUE),
+      colnames = c("Date", "Description", "Category", "Sub-category", "Amount", "Payer", "Account")
     ) %>%
       formatCurrency("amount", currency = "$", interval = 3, mark = ",")
   })
@@ -470,7 +546,10 @@ server <- function(input, output, session) {
 
   # Budget management --------------------------------------------------------
   observeEvent(input$add_budget, {
-    budgets(bind_rows(budgets(), tibble(category = "", target_amount = 0)))
+    budgets(
+      bind_rows(budgets(), tibble(category = "", subcategory = "", target_amount = 0)) %>%
+        prepare_budget_frame()
+    )
   })
 
   observeEvent(input$delete_budget, {
@@ -478,7 +557,7 @@ server <- function(input, output, session) {
     if (length(rows)) {
       df <- budgets()
       df <- df[-rows, , drop = FALSE]
-      budgets(df)
+      budgets(prepare_budget_frame(df))
     }
   })
 
@@ -489,11 +568,11 @@ server <- function(input, output, session) {
     value <- if (col == "target_amount") as.numeric(info$value) else trimws(as.character(info$value))
     if (col == "target_amount" && is.na(value)) value <- 0
     df[info$row, col] <- value
-    budgets(prepare_numeric_frame(df, "category", "target_amount"))
+    budgets(prepare_budget_frame(df))
   })
 
   observeEvent(input$save_budget, {
-    cleaned <- prepare_numeric_frame(budgets(), "category", "target_amount")
+    cleaned <- prepare_budget_frame(budgets())
     write_budget(cleaned)
     budgets(cleaned)
     showNotification("Budget targets saved", type = "message")
@@ -505,7 +584,8 @@ server <- function(input, output, session) {
       selection = "single",
       editable = "cell",
       rownames = FALSE,
-      options = list(dom = "t", pageLength = 10)
+      options = list(dom = "t", pageLength = 10),
+      colnames = c("Category", "Sub-category", "Monthly target")
     ) %>%
       formatCurrency("target_amount", currency = "$", interval = 3, mark = ",")
   })
@@ -533,7 +613,34 @@ server <- function(input, output, session) {
     }
     total <- sum(df$amount, na.rm = TRUE)
     avg <- mean(df$amount, na.rm = TRUE)
-    sprintf("Total spent: %s\nAverage transaction: %s", dollar(total), dollar(avg))
+    top_category <- df %>%
+      group_by(category) %>%
+      summarise(spent = sum(amount, na.rm = TRUE), .groups = "drop") %>%
+      arrange(desc(spent)) %>%
+      slice_head(n = 1)
+
+    top_line <- if (nrow(top_category)) {
+      name <- if_else(nzchar(top_category$category), top_category$category, "Uncategorized")
+      sprintf("Top category: %s (%s)", name, dollar(top_category$spent))
+    } else {
+      ""
+    }
+
+    progress <- category_summary(df, budgets())
+    over_budget <- progress %>% filter(!is.na(percent_used) & percent_used > 100)
+    over_line <- if (nrow(over_budget)) {
+      sprintf("%s category%s over budget", nrow(over_budget), if_else(nrow(over_budget) == 1, " is", " are"))
+    } else {
+      "All budgeted categories are on track"
+    }
+
+    paste(
+      sprintf("Total spent: %s", dollar(total)),
+      sprintf("Average transaction: %s", dollar(avg)),
+      top_line,
+      over_line,
+      sep = "\n"
+    )
   })
 
   output$spending_plot <- renderPlot({
@@ -552,6 +659,58 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 14)
   })
 
+  output$budget_progress_plot <- renderPlot({
+    df <- category_data()
+    df <- df %>% filter(!is.na(percent_used))
+    if (!nrow(df)) return(NULL)
+    df <- df %>% mutate(
+      label = if_else(nzchar(subcategory), paste(category, subcategory, sep = " › "), category)
+    )
+    ggplot(df, aes(x = reorder(label, percent_used), y = percent_used, fill = percent_used)) +
+      geom_col() +
+      geom_hline(yintercept = 100, linetype = "dashed", color = "#cb181d") +
+      coord_flip() +
+      scale_y_continuous(
+        labels = function(x) paste0(round(x), "%"),
+        limits = c(0, max(110, max(df$percent_used, na.rm = TRUE)))
+      ) +
+      scale_fill_gradient2(
+        low = "#2c7fb8",
+        mid = "#fdd49e",
+        high = "#b30000",
+        midpoint = 100,
+        guide = "none"
+      ) +
+      labs(x = NULL, y = "% of budget used", title = "Spending vs. budget") +
+      theme_minimal(base_size = 14)
+  })
+
+  category_trend <- reactive({
+    df <- filtered_expenses()
+    if (!nrow(df)) return(df)
+    df %>%
+      mutate(date = ymd(date, quiet = TRUE)) %>%
+      filter(!is.na(date)) %>%
+      mutate(month = floor_date(date, "month")) %>%
+      group_by(category, month) %>%
+      summarise(spent = sum(amount, na.rm = TRUE), .groups = "drop")
+  })
+
+  output$category_trend_plot <- renderPlot({
+    df <- category_trend()
+    if (!nrow(df)) return(NULL)
+    ggplot(df, aes(x = month, y = spent, color = category)) +
+      geom_line(size = 1) +
+      geom_point(size = 2) +
+      scale_y_continuous(labels = dollar_format()) +
+      scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
+      labs(x = NULL, y = "Amount", title = "Monthly spending trend by category", color = "Category") +
+      facet_wrap(~ category, scales = "free_y") +
+      theme_minimal(base_size = 14) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      guides(color = "none")
+  })
+
   output$category_table <- renderDT({
     df <- category_data()
     if (!nrow(df)) {
@@ -560,9 +719,11 @@ server <- function(input, output, session) {
     DT::datatable(
       df,
       rownames = FALSE,
-      options = list(pageLength = 10, order = list(list(1, "desc")))
+      options = list(pageLength = 10, order = list(list(2, "desc"))),
+      colnames = c("Category", "Sub-category", "Spent", "Budget", "Difference", "% of budget")
     ) %>%
-      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",")
+      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",") %>%
+      formatPercentage("percent_used", 1)
   })
 
   output$over_budget_table <- renderDT({
@@ -570,8 +731,14 @@ server <- function(input, output, session) {
     if (!nrow(df)) {
       return(DT::datatable(tibble(message = "None"), options = list(dom = "t"), rownames = FALSE))
     }
-    DT::datatable(df, rownames = FALSE, options = list(dom = "t")) %>%
-      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",")
+    DT::datatable(
+      df,
+      rownames = FALSE,
+      options = list(dom = "t"),
+      colnames = c("Category", "Sub-category", "Spent", "Budget", "Difference", "% of budget")
+    ) %>%
+      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",") %>%
+      formatPercentage("percent_used", 1)
   })
 
   output$under_budget_table <- renderDT({
@@ -579,8 +746,14 @@ server <- function(input, output, session) {
     if (!nrow(df)) {
       return(DT::datatable(tibble(message = "None"), options = list(dom = "t"), rownames = FALSE))
     }
-    DT::datatable(df, rownames = FALSE, options = list(dom = "t")) %>%
-      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",")
+    DT::datatable(
+      df,
+      rownames = FALSE,
+      options = list(dom = "t"),
+      colnames = c("Category", "Sub-category", "Spent", "Budget", "Difference", "% of budget")
+    ) %>%
+      formatCurrency(c("spent", "target_amount", "difference"), currency = "$", interval = 3, mark = ",") %>%
+      formatPercentage("percent_used", 1)
   })
 }
 
