@@ -46,6 +46,7 @@ def build() -> None:
         print(
             "PyInstaller completed but the expected installer/dist/BudgetingTool folder was not found."
         )
+
         return
 
     archive_suffix = platform.system().lower()

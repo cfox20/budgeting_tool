@@ -1,6 +1,7 @@
 ; Budgeting Tool Windows installer created with Inno Setup
 ; Build this after running installer/build_installer.py so installer/dist/BudgetingTool exists.
 
+
 [Setup]
 AppId={{C69163E5-2FA5-4F23-9A5E-8D9970A3B8D1}
 AppName=Budgeting Tool

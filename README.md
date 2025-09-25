@@ -14,6 +14,7 @@ experience, but you can customise the UI and server logic directly in `r_app/`.
 - **Quick data entry** with Shiny inputs for dates, descriptions, categories,
   sub-categories, payers, accounts, and amounts plus an editable table of every
   previous transaction.
+
 - **Safe persistence** that keeps an on-disk CSV plus an automatically managed
   backup. You inspect a preview before every save so accidental overwrites are
   less likely.
@@ -25,6 +26,7 @@ experience, but you can customise the UI and server logic directly in `r_app/`.
 - **Offline storage** – when running from source the app keeps everything in
   `user_data/` (ignored by Git) so your finances stay private while remaining
   easy to back up or edit with another tool.
+
 
 ## Prerequisites
 
@@ -176,6 +178,7 @@ refresh the reports.
   virtual environment that already has PySide6 and pandas installed, and that the
   target machine also has R available.
 - To reset the app, close it and delete the data directory. The next launch
+
   recreates it with the default sample records.
 
 Enjoy budgeting with a fully local desktop experience powered by R Shiny!

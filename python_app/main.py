@@ -12,6 +12,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .data_store import BudgetDataStore
 from .shiny_launcher import ShinyAppProcess
 
+def _determine_data_dir(project_root: Path) -> Path:
+    """Return the directory used to persist user data."""
 
 def _platform_user_data_dir(app_name: str) -> Path:
     """Return a user-writable data directory for the current platform."""
@@ -38,6 +40,8 @@ def _determine_data_dir(project_root: Path) -> Path:
         return _platform_user_data_dir("Budgeting Tool")
     return project_root / "user_data"
 
+    QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_ShareOpenGLContexts, True)
+    app = QtWidgets.QApplication(sys.argv)
 
 class ShinyWindow(QtWidgets.QMainWindow):
     """Qt window embedding the running R Shiny budgeting app."""
@@ -70,6 +74,9 @@ class ShinyWindow(QtWidgets.QMainWindow):
                 f"Check '{log_path}' for errors and ensure R is installed."
             ),
         )
+        if shiny_process is not None:
+            shiny_process.stop()
+        return 1
 
     # ------------------------------------------------------------------
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]

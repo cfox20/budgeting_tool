@@ -37,6 +37,7 @@ empty_expenses <- tibble(
   description = character(),
   category = character(),
   subcategory = character(),
+
   amount = double(),
   payer = character(),
   account = character()
@@ -44,6 +45,7 @@ empty_expenses <- tibble(
 
 empty_income <- tibble(source = character(), amount = double())
 empty_budget <- tibble(category = character(), subcategory = character(), target_amount = double())
+
 
 safe_read <- function(path, col_types, empty_frame, transform) {
   if (!file.exists(path)) {
@@ -390,6 +392,7 @@ server <- function(input, output, session) {
     subs <- clean_choices(subcat_choices$subcategory)
     updateSelectizeInput(session, "expense_subcategory", choices = subs, server = TRUE)
 
+
     payers <- clean_choices(expenses()[["payer"]])
     updateSelectizeInput(session, "expense_payer", choices = payers, server = TRUE)
 
@@ -424,6 +427,7 @@ server <- function(input, output, session) {
       df <- expenses()
       df <- df[-selected, , drop = FALSE]
       expenses(prepare_expenses(df))
+
     }
   })
 
