@@ -25,7 +25,6 @@ if (!dir.exists(data_dir)) {
 }
 message("Using budgeting data directory: ", data_dir)
 
-
 paths <- list(
   expenses = file.path(data_dir, "expenses.csv"),
   expenses_backup = file.path(data_dir, "expenses_backup.csv"),

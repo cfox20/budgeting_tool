@@ -84,8 +84,30 @@ You can bundle the application into a platform-specific executable using
    the platform. The bundle includes the Shiny sources from `r_app/`; you still
    need R installed on the target machine so the wrapped process can run.
 
-3. (Optional) Create a desktop shortcut that points at the bundled executable so
-   you can launch the budgeting tool with a single click.
+   The script also zips the bundle into a timestamped archive such as
+   `BudgetingTool-windows-20240101.zip`. Upload that archive to your repository's
+   releases page and share a direct download link like:
+
+   ```
+   https://github.com/<your-account>/budgeting_tool/releases/latest/download/BudgetingTool-windows-20240101.zip
+   ```
+
+   Replace `<your-account>` and the archive name with the values that match your
+   release. Anyone with that URL can download the ready-to-run bundle without
+   cloning the repository.
+
+3. (Optional, Windows) Generate a traditional installer with a Start Menu entry
+   and an optional desktop shortcut using
+   [Inno Setup](https://jrsoftware.org/isinfo.php):
+
+   1. Install Inno Setup.
+   2. Run PyInstaller as shown above so `dist/BudgetingTool` exists.
+   3. Open `installer/windows_installer.iss` in Inno Setup and build it. The
+      script outputs `dist/BudgetingToolSetup.exe`.
+
+   During installation the user can tick **Create a desktop icon**. The installer
+   also adds a Start Menu shortcut and offers to launch the budgeting tool when
+   the wizard finishes.
 
 ## Application overview
 

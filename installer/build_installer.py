@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import os
+import platform
+import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -31,6 +34,23 @@ def build() -> None:
     ]
     print("Running", " ".join(cmd))
     subprocess.check_call(cmd, env=env)
+
+    dist_root = project_root / "dist"
+    bundle_dir = dist_root / "BudgetingTool"
+    if not bundle_dir.exists():
+        print("PyInstaller completed but the expected dist/BudgetingTool folder was not found.")
+        return
+
+    archive_suffix = platform.system().lower()
+    if archive_suffix == "darwin":
+        archive_suffix = "macos"
+    archive_name = f"BudgetingTool-{archive_suffix}"
+    timestamp = datetime.utcnow().strftime("%Y%m%d")
+    archive_path = dist_root / f"{archive_name}-{timestamp}"
+
+    print(f"Creating release archive {archive_path.name}.zip from {bundle_dir}…")
+    shutil.make_archive(str(archive_path), "zip", root_dir=bundle_dir)
+    print(f"Release archive ready: {archive_path.name}.zip")
 
 
 if __name__ == "__main__":
