@@ -9,5 +9,26 @@ if (length(missing) > 0) {
   quit(status = 1)
 }
 
+host <- Sys.getenv("SHINY_HOST", unset = "127.0.0.1")
+port_env <- Sys.getenv("SHINY_PORT", unset = "")
+launch_browser_env <- tolower(Sys.getenv("SHINY_LAUNCH_BROWSER", unset = "true"))
+
+port <- if (nzchar(port_env)) {
+  suppressWarnings(as.integer(port_env))
+} else {
+  NULL
+}
+
+if (!is.null(port) && (is.na(port) || port <= 0)) {
+  stop("Invalid SHINY_PORT value: ", port_env)
+}
+
+launch_browser <- if (launch_browser_env %in% c("false", "0", "no")) FALSE else TRUE
+
 message("Launching the Household Expense Tracker...")
-shiny::runApp(appDir = "app", launch.browser = TRUE)
+shiny::runApp(
+  appDir = "app",
+  launch.browser = launch_browser,
+  host = host,
+  port = port
+)

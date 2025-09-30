@@ -29,7 +29,25 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 
    This script checks for the required packages and then opens the Shiny app in your default web browser. Because the app is executed locally, your expense data never leaves your computer.
 
-4. *(Optional)* **Install a desktop shortcut** by running:
+   If you set the environment variable `SHINY_LAUNCH_BROWSER=false` the script will skip opening a browser window, which is useful when embedding the app elsewhere.
+
+4. **Run the desktop experience with Python (optional)**
+
+   Install Python 3.9 or newer plus the lightweight [pywebview](https://pywebview.flowrl.com/) dependency:
+
+   ```bash
+   pip install pywebview
+   ```
+
+   Then start the bundled launcher which opens the Shiny app in a native desktop window while managing the underlying R process:
+
+   ```bash
+   python desktop_app.py
+   ```
+
+   The script automatically picks an available local port, waits for the Shiny server to become ready, and shuts it down again when you close the window. Use `python desktop_app.py --help` to see advanced options such as overriding the `Rscript` path.
+
+5. *(Optional)* **Install a desktop shortcut** by running:
 
    ```bash
    Rscript tools/install_shortcut.R
