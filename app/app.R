@@ -1,10 +1,10 @@
 library(shiny)
 library(DT)
-library(readr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(scales)
+
 
 # Data configuration -----------------------------------------------------------
 
@@ -106,6 +106,7 @@ load_monthly_income <- function() {
   }
 
   income <- readr::read_csv(
+
     income_path,
     col_types = cols(
       Source = col_character(),
@@ -161,6 +162,7 @@ ui <- navbarPage(
             choices = NULL,
             options = list(placeholder = "Select or add a category", create = TRUE)
           ),
+          numericInput("expense_amount", "Amount", value = NA, min = 0, step = 0.01),
           selectizeInput(
             "expense_subcategory",
             "Subcategory",
@@ -273,7 +275,6 @@ server <- function(input, output, session) {
     if (!is.null(input$budget_category) && nzchar(input$budget_category)) {
       categories <- unique(c(categories, input$budget_category))
     }
-
     updateSelectizeInput(
       session,
       "expense_category",
@@ -584,7 +585,6 @@ server <- function(input, output, session) {
       group_by(Category) %>%
       summarise(Total = sum(Total, na.rm = TRUE), .groups = "drop") %>%
       arrange(Total)
-
     validate(need(nrow(summary) > 0, "Add expenses to see the plot."))
 
     ggplot(summary, aes(x = reorder(Category, Total), y = Total)) +
