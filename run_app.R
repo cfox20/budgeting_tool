@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-required_packages <- c("shiny", "DT", "readr", "dplyr", "lubridate", "ggplot2", "scales")
+required_packages <- c("shiny", "DT", "readr", "dplyr", "tidyr", "lubridate", "ggplot2", "scales")
 missing <- required_packages[!vapply(required_packages, requireNamespace, FUN.VALUE = logical(1), quietly = TRUE)]
 
 if (length(missing) > 0) {
