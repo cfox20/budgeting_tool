@@ -1,10 +1,9 @@
 library(shiny)
 library(DT)
-library(readr)
 library(dplyr)
 library(tidyr)
+
 library(ggplot2)
-library(scales)
 
 # Data configuration -----------------------------------------------------------
 
@@ -16,6 +15,7 @@ if (!dir.exists(data_dir)) {
 expenses_path <- file.path(data_dir, "expenses.csv")
 budgets_path <- file.path(data_dir, "category_budget.csv")
 income_path <- file.path(data_dir, "income_sources.csv")
+
 
 empty_expenses <- tibble::tibble(
   Date = as.Date(character()),
@@ -133,7 +133,6 @@ format_subcategory <- function(value) {
 }
 
 # User interface --------------------------------------------------------------
-
 ui <- navbarPage(
   title = "Household Budgeting",
   tabPanel(
@@ -539,7 +538,6 @@ server <- function(input, output, session) {
       group_by(Category) %>%
       summarise(Total = sum(Total, na.rm = TRUE), .groups = "drop") %>%
       arrange(Total)
-
     validate(need(nrow(summary) > 0, "Add expenses to see the plot."))
 
     ggplot(summary, aes(x = reorder(Category, Total), y = Total)) +
