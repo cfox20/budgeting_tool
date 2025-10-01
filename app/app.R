@@ -2,8 +2,9 @@ library(shiny)
 library(DT)
 library(dplyr)
 library(tidyr)
-
 library(ggplot2)
+library(scales)
+
 
 # Data configuration -----------------------------------------------------------
 
@@ -15,7 +16,6 @@ if (!dir.exists(data_dir)) {
 expenses_path <- file.path(data_dir, "expenses.csv")
 budgets_path <- file.path(data_dir, "category_budget.csv")
 income_path <- file.path(data_dir, "income_sources.csv")
-
 
 empty_expenses <- tibble::tibble(
   Date = as.Date(character()),
@@ -100,12 +100,13 @@ load_budgets <- function() {
     arrange(Category, Subcategory)
 }
 
-load_income_sources <- function() {
+load_monthly_income <- function() {
   if (!file.exists(income_path)) {
-    return(tibble::tibble(Source = character(), Amount = numeric()))
+    return(NA_real_)
   }
 
-  readr::read_csv(
+  income <- readr::read_csv(
+
     income_path,
     col_types = cols(
       Source = col_character(),
@@ -113,10 +114,15 @@ load_income_sources <- function() {
     ),
     show_col_types = FALSE
   ) %>%
-    mutate(
-      Source = tidyr::replace_na(Source, ""),
-      Amount = replace_na(Amount, 0)
-    )
+    mutate(Amount = replace_na(Amount, 0)) %>%
+    summarise(total = sum(Amount, na.rm = TRUE)) %>%
+    pull(total)
+
+  if (is.finite(income) && length(income) == 1) {
+    income
+  } else {
+    NA_real_
+  }
 }
 
 write_expenses <- function(df) {
@@ -127,12 +133,18 @@ write_budgets <- function(df) {
   readr::write_csv(df, budgets_path, na = "")
 }
 
+write_monthly_income <- function(amount) {
+  tibble::tibble(Source = "Monthly", Amount = amount) %>%
+    readr::write_csv(income_path, na = "")
+}
+
 format_subcategory <- function(value) {
   value <- clean_subcategory(value)
   ifelse(nzchar(value), value, "(Unspecified)")
 }
 
 # User interface --------------------------------------------------------------
+
 ui <- navbarPage(
   title = "Household Budgeting",
   tabPanel(
@@ -150,6 +162,7 @@ ui <- navbarPage(
             choices = NULL,
             options = list(placeholder = "Select or add a category", create = TRUE)
           ),
+          numericInput("expense_amount", "Amount", value = NA, min = 0, step = 0.01),
           selectizeInput(
             "expense_subcategory",
             "Subcategory",
@@ -238,27 +251,35 @@ ui <- navbarPage(
 server <- function(input, output, session) {
   expenses <- reactiveVal(load_expenses())
   budgets <- reactiveVal(load_budgets())
-  income_sources <- reactiveVal(load_income_sources())
-
-  initial_income <- sum(income_sources()$Amount, na.rm = TRUE)
-  monthly_income <- reactiveVal(ifelse(is.finite(initial_income), initial_income, NA_real_))
+  monthly_income <- reactiveVal(load_monthly_income())
 
   observeEvent(TRUE, {
     updateNumericInput(session, "income", value = monthly_income())
   }, once = TRUE)
 
   observe({
-    categories <- budgets() %>%
+    expense_categories <- expenses() %>%
       filter(nzchar(Category)) %>%
-      distinct(Category) %>%
-      arrange(Category) %>%
       pull(Category)
 
+    budget_categories <- budgets() %>%
+      filter(nzchar(Category)) %>%
+      pull(Category)
+
+    categories <- sort(unique(c(expense_categories, budget_categories)))
+
+    if (!is.null(input$expense_category) && nzchar(input$expense_category)) {
+      categories <- unique(c(categories, input$expense_category))
+    }
+
+    if (!is.null(input$budget_category) && nzchar(input$budget_category)) {
+      categories <- unique(c(categories, input$budget_category))
+    }
     updateSelectizeInput(
       session,
       "expense_category",
       choices = categories,
-      selected = if (length(categories) && input$expense_category %in% categories) input$expense_category else NULL,
+      selected = input$expense_category,
       server = FALSE
     )
 
@@ -266,7 +287,7 @@ server <- function(input, output, session) {
       session,
       "budget_category",
       choices = categories,
-      selected = if (length(categories) && input$budget_category %in% categories) input$budget_category else NULL,
+      selected = input$budget_category,
       server = FALSE
     )
   })
@@ -274,55 +295,79 @@ server <- function(input, output, session) {
   observe({
     payers <- expenses() %>%
       filter(nzchar(Payer)) %>%
-      distinct(Payer) %>%
-      arrange(Payer) %>%
       pull(Payer)
 
-    payers <- unique(c(default_payers, payers))
+    payers <- sort(unique(c(default_payers, payers)))
+
+    if (!is.null(input$expense_payer) && nzchar(input$expense_payer)) {
+      payers <- unique(c(payers, input$expense_payer))
+    }
 
     updateSelectizeInput(
       session,
       "expense_payer",
       choices = payers,
-      selected = if (length(payers) && input$expense_payer %in% payers) input$expense_payer else NULL,
+      selected = input$expense_payer,
       server = FALSE
     )
   })
 
-  observeEvent(input$expense_category, {
-    req(!is.null(input$expense_category))
-    subchoices <- budgets() %>%
-      filter(Category == input$expense_category, nzchar(Subcategory)) %>%
-      distinct(Subcategory) %>%
-      arrange(Subcategory) %>%
+  observe({
+    category <- input$expense_category
+
+    if (is.null(category) || !nzchar(category)) {
+      updateSelectizeInput(session, "expense_subcategory", choices = character(0), selected = NULL, server = FALSE)
+      return()
+    }
+
+    expense_subs <- expenses() %>%
+      filter(Category == category, nzchar(Subcategory)) %>%
       pull(Subcategory)
+
+    budget_subs <- budgets() %>%
+      filter(Category == category, nzchar(Subcategory)) %>%
+      pull(Subcategory)
+
+    subchoices <- sort(unique(c(clean_subcategory(expense_subs), clean_subcategory(budget_subs))))
+
+    current <- clean_subcategory(input$expense_subcategory)
+    if (nzchar(current)) {
+      subchoices <- unique(c(subchoices, current))
+    }
 
     updateSelectizeInput(
       session,
       "expense_subcategory",
       choices = subchoices,
-      selected = if (length(subchoices) && input$expense_subcategory %in% subchoices) input$expense_subcategory else NULL,
+      selected = if (nzchar(current)) current else NULL,
       server = FALSE
     )
   })
 
-  observeEvent(input$budget_category, {
-    if (is.null(input$budget_category) || !nzchar(input$budget_category)) {
+  observe({
+    category <- input$budget_category
+
+    if (is.null(category) || !nzchar(category)) {
       updateSelectizeInput(session, "budget_subcategory", choices = character(0), selected = NULL, server = FALSE)
       return()
     }
 
     subchoices <- budgets() %>%
-      filter(Category == input$budget_category, nzchar(Subcategory)) %>%
-      distinct(Subcategory) %>%
-      arrange(Subcategory) %>%
-      pull(Subcategory)
+      filter(Category == category, nzchar(Subcategory)) %>%
+      pull(Subcategory) %>%
+      clean_subcategory() %>%
+      sort()
+
+    current <- clean_subcategory(input$budget_subcategory)
+    if (nzchar(current)) {
+      subchoices <- unique(c(subchoices, current))
+    }
 
     updateSelectizeInput(
       session,
       "budget_subcategory",
       choices = subchoices,
-      selected = if (length(subchoices) && input$budget_subcategory %in% subchoices) input$budget_subcategory else NULL,
+      selected = if (nzchar(current)) current else NULL,
       server = FALSE
     )
   })
@@ -399,7 +444,9 @@ server <- function(input, output, session) {
     validate(
       need(!is.null(input$income) && !is.na(input$income) && input$income >= 0, "Enter a non-negative income.")
     )
-    monthly_income(as.numeric(input$income))
+    amount <- as.numeric(input$income)
+    monthly_income(amount)
+    write_monthly_income(amount)
     showNotification("Income updated.", type = "message")
   })
 
