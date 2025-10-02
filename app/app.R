@@ -3,8 +3,10 @@ library(DT)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(plotly)
 library(scales)
 library(readr)
+library(lubridate)
 
 
 # Data configuration -----------------------------------------------------------
@@ -163,7 +165,6 @@ ui <- navbarPage(
             choices = NULL,
             options = list(placeholder = "Select or add a category", create = TRUE)
           ),
-          numericInput("expense_amount", "Amount", value = NA, min = 0, step = 0.01),
           selectizeInput(
             "expense_subcategory",
             "Subcategory",
@@ -186,6 +187,7 @@ ui <- navbarPage(
         column(
           width = 8,
           h3("Recorded expenses"),
+          actionButton("delete_expense", "Delete selected expense", class = "btn-danger mb-2"),
           DTOutput("expense_table")
         )
       )
@@ -222,6 +224,7 @@ ui <- navbarPage(
           width = 8,
           h3("Budgets"),
           uiOutput("income_summary"),
+          actionButton("delete_budget", "Delete selected budget", class = "btn-danger mb-2"),
           DTOutput("budget_table")
         )
       )
@@ -235,6 +238,33 @@ ui <- navbarPage(
           width = 12,
           h3("Budget performance"),
           DTOutput("report_table"),
+          br(),
+          h3("Spending trends"),
+          fluidRow(
+            column(
+              width = 4,
+              selectInput(
+                "spending_period",
+                "Time aggregation",
+                choices = c("Monthly" = "month", "Weekly" = "week"),
+                selected = "month"
+              )
+            ),
+            column(
+              width = 4,
+              selectInput(
+                "spending_view",
+                "View",
+                choices = c("Total spending" = "total", "By category" = "category"),
+                selected = "total"
+              )
+            ),
+            column(
+              width = 4,
+              uiOutput("trend_category_filter")
+            )
+          ),
+          plotlyOutput("spending_trend", height = "400px"),
           br(),
           h3("Spending by category"),
           plotOutput("category_plot", height = "350px"),
@@ -405,6 +435,31 @@ server <- function(input, output, session) {
     showNotification("Expense added.", type = "message")
   })
 
+  observeEvent(input$delete_expense, {
+    selected <- input$expense_table_rows_selected
+    if (length(selected) == 0) {
+      showNotification("Select an expense to delete.", type = "warning")
+      return()
+    }
+
+    current <- expenses()
+    if (nrow(current) == 0) {
+      showNotification("No expenses to delete.", type = "warning")
+      return()
+    }
+
+    valid <- selected[selected >= 1 & selected <= nrow(current)]
+    if (length(valid) == 0) {
+      showNotification("Selected expense is no longer available.", type = "error")
+      return()
+    }
+
+    updated <- current[-valid, , drop = FALSE]
+    expenses(updated)
+    write_expenses(updated)
+    showNotification("Expense deleted.", type = "message")
+  })
+
   observeEvent(input$add_budget, {
     category <- trimws(input$budget_category)
     subcategory <- clean_subcategory(input$budget_subcategory)
@@ -441,6 +496,31 @@ server <- function(input, output, session) {
     showNotification("Budget saved.", type = "message")
   })
 
+  observeEvent(input$delete_budget, {
+    selected <- input$budget_table_rows_selected
+    if (length(selected) == 0) {
+      showNotification("Select a budget to delete.", type = "warning")
+      return()
+    }
+
+    current <- budgets()
+    if (nrow(current) == 0) {
+      showNotification("No budgets to delete.", type = "warning")
+      return()
+    }
+
+    valid <- selected[selected >= 1 & selected <= nrow(current)]
+    if (length(valid) == 0) {
+      showNotification("Selected budget is no longer available.", type = "error")
+      return()
+    }
+
+    updated <- current[-valid, , drop = FALSE]
+    budgets(updated)
+    write_budgets(updated)
+    showNotification("Budget deleted.", type = "message")
+  })
+
   observeEvent(input$set_income, {
     validate(
       need(!is.null(input$income) && !is.na(input$income) && input$income >= 0, "Enter a non-negative income.")
@@ -474,7 +554,8 @@ server <- function(input, output, session) {
     datatable(
       data,
       rownames = FALSE,
-      options = list(pageLength = 10, lengthMenu = c(5, 10, 20))
+      options = list(pageLength = 10, lengthMenu = c(5, 10, 20)),
+      selection = "single"
     ) %>%
       formatCurrency("Amount", currency = "$", interval = 3, mark = ",", digits = 2)
   })
@@ -488,7 +569,8 @@ server <- function(input, output, session) {
     datatable(
       data,
       rownames = FALSE,
-      options = list(pageLength = 10, lengthMenu = c(5, 10, 20))
+      options = list(pageLength = 10, lengthMenu = c(5, 10, 20)),
+      selection = "single"
     ) %>%
       formatCurrency("Limit", currency = "$", interval = 3, mark = ",", digits = 2)
   })
@@ -512,6 +594,120 @@ server <- function(input, output, session) {
         if (is.na(remaining)) "--" else dollar(remaining)
       )
     )
+  })
+
+  output$trend_category_filter <- renderUI({
+    if (!identical(input$spending_view, "category")) {
+      return(NULL)
+    }
+
+    categories <- expenses() %>%
+      mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
+      pull(Category) %>%
+      unique() %>%
+      sort()
+
+    if (length(categories) == 0) {
+      return(tags$p("Add expenses to choose categories."))
+    }
+
+    selected <- input$trend_categories
+    selected <- selected[selected %in% categories]
+    if (length(selected) == 0) {
+      selected <- categories
+    }
+
+    selectizeInput(
+      "trend_categories",
+      "Categories",
+      choices = categories,
+      selected = selected,
+      multiple = TRUE,
+      options = list(placeholder = "Filter categories", plugins = list("remove_button"))
+    )
+  })
+
+  output$spending_trend <- renderPlotly({
+    df <- expenses()
+    validate(need(nrow(df) > 0, "Add expenses to see spending trends."))
+
+    df <- df %>%
+      filter(!is.na(Date)) %>%
+      mutate(
+        Category = ifelse(nzchar(Category), Category, "(Uncategorized)"),
+        Amount = replace_na(Amount, 0)
+      )
+
+    validate(need(nrow(df) > 0, "Add expenses with dates to see spending trends."))
+
+    unit <- if (identical(input$spending_period, "week")) "week" else "month"
+    df <- df %>%
+      mutate(
+        Period = if (unit == "week") {
+          floor_date(Date, unit = "week", week_start = 1)
+        } else {
+          floor_date(Date, unit = "month")
+        }
+      )
+
+    if (!identical(input$spending_view, "category")) {
+      summary <- df %>%
+        group_by(Period) %>%
+        summarise(Total = sum(Amount, na.rm = TRUE), .groups = "drop") %>%
+        arrange(Period)
+
+      validate(need(nrow(summary) > 0, "Add expenses to see spending trends."))
+
+      plot_ly(
+        summary,
+        x = ~Period,
+        y = ~Total,
+        type = "scatter",
+        mode = "lines+markers",
+        hovertemplate = paste0("%{x|%b %d, %Y}<br>Total: $%{y:,.2f}<extra></extra>"),
+        name = "Total"
+      ) %>%
+        layout(
+          xaxis = list(title = if (unit == "week") "Week" else "Month"),
+          yaxis = list(title = "Spending", tickprefix = "$", separatethousands = TRUE),
+          legend = list(orientation = "h", x = 0, y = -0.2),
+          title = "Spending over time"
+        )
+    } else {
+      selected <- input$trend_categories
+      if (!is.null(selected) && length(selected) > 0) {
+        df <- df %>% filter(Category %in% selected)
+      }
+
+      summary <- df %>%
+        group_by(Period, Category) %>%
+        summarise(Total = sum(Amount, na.rm = TRUE), .groups = "drop") %>%
+        arrange(Period)
+
+      validate(need(nrow(summary) > 0, "Adjust filters to see spending trends."))
+
+      plt <- plot_ly()
+      categories <- unique(summary$Category)
+      for (cat in categories) {
+        cat_data <- summary %>% filter(Category == cat)
+        plt <- plt %>% add_trace(
+          data = cat_data,
+          x = ~Period,
+          y = ~Total,
+          type = "scatter",
+          mode = "lines+markers",
+          name = cat,
+          hovertemplate = paste0("%{x|%b %d, %Y}<br>", cat, ": $%{y:,.2f}<extra></extra>")
+        )
+      }
+
+      plt %>% layout(
+        xaxis = list(title = if (unit == "week") "Week" else "Month"),
+        yaxis = list(title = "Spending", tickprefix = "$", separatethousands = TRUE),
+        legend = list(orientation = "h", x = 0, y = -0.2),
+        title = "Spending over time"
+      )
+    }
   })
 
   category_summary <- reactive({
@@ -582,17 +778,44 @@ server <- function(input, output, session) {
   })
 
   output$category_plot <- renderPlot({
-    summary <- category_summary() %>%
+    expense_summary <- category_summary() %>%
+      mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
       group_by(Category) %>%
-      summarise(Total = sum(Total, na.rm = TRUE), .groups = "drop") %>%
+      summarise(Total = sum(Total, na.rm = TRUE), .groups = "drop")
+
+    budget_summary <- budgets() %>%
+      mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
+      group_by(Category) %>%
+      summarise(Limit = sum(Limit, na.rm = TRUE), .groups = "drop")
+
+    summary <- full_join(expense_summary, budget_summary, by = "Category") %>%
+      mutate(
+        Total = replace_na(Total, 0),
+        Fill = if_else(!is.na(Limit) & Total > Limit, "#d73027", "#1b9e77")
+      ) %>%
       arrange(Total)
-    validate(need(nrow(summary) > 0, "Add expenses to see the plot."))
+
+    validate(need(nrow(summary) > 0, "Add expenses or budgets to see the plot."))
 
     ggplot(summary, aes(x = reorder(Category, Total), y = Total)) +
-      geom_col(fill = "#1b9e77") +
+      geom_col(aes(fill = Fill), show.legend = FALSE) +
+      geom_segment(
+        data = summary %>% filter(!is.na(Limit)),
+        aes(
+          x = reorder(Category, Total),
+          xend = reorder(Category, Total),
+          y = 0,
+          yend = Limit
+        ),
+        inherit.aes = FALSE,
+        linetype = "dashed",
+        color = "#333333",
+        linewidth = 0.8
+      ) +
       coord_flip() +
       labs(x = "Category", y = "Total spent", title = "Spending by category") +
       scale_y_continuous(labels = dollar_format()) +
+      scale_fill_identity() +
       theme_minimal(base_size = 14)
   })
 }
