@@ -4,6 +4,7 @@ library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(scales)
+library(readr)
 
 
 # Data configuration -----------------------------------------------------------
@@ -46,7 +47,7 @@ load_expenses <- function() {
 
   df <- readr::read_csv(
     expenses_path,
-    col_types = cols(
+    col_types = readr::cols(
       Date = col_date(),
       Description = col_character(),
       Category = col_character(),
