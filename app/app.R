@@ -146,6 +146,14 @@ format_subcategory <- function(value) {
   ifelse(nzchar(value), value, "(Unspecified)")
 }
 
+format_expense_table_data <- function(df) {
+  df %>% mutate(Subcategory = format_subcategory(Subcategory))
+}
+
+format_budget_table_data <- function(df) {
+  df %>% mutate(Subcategory = format_subcategory(Subcategory))
+}
+
 # User interface --------------------------------------------------------------
 
 ui <- navbarPage(
@@ -283,6 +291,8 @@ server <- function(input, output, session) {
   expenses <- reactiveVal(load_expenses())
   budgets <- reactiveVal(load_budgets())
   monthly_income <- reactiveVal(load_monthly_income())
+  pending_expense_delete <- reactiveVal(NULL)
+  pending_budget_delete <- reactiveVal(NULL)
 
   observeEvent(TRUE, {
     updateNumericInput(session, "income", value = monthly_income())
@@ -454,10 +464,30 @@ server <- function(input, output, session) {
       return()
     }
 
-    updated <- current[-valid, , drop = FALSE]
-    expenses(updated)
-    write_expenses(updated)
-    showNotification("Expense deleted.", type = "message")
+    row_idx <- valid[1]
+    record <- current[row_idx, , drop = FALSE]
+    pending_expense_delete(list(row_data = record))
+
+    showModal(modalDialog(
+      title = "Delete expense",
+      easyClose = FALSE,
+      size = "m",
+      tags$p("Are you sure you want to delete this expense?"),
+      tags$ul(
+        tags$li(strong("Date:"), format(record$Date)),
+        tags$li(strong("Description:"), record$Description),
+        tags$li(
+          strong("Category:"),
+          paste(record$Category, format_subcategory(record$Subcategory), sep = " › ")
+        ),
+        tags$li(strong("Amount:"), scales::dollar(record$Amount)),
+        tags$li(strong("Payer:"), ifelse(nzchar(record$Payer), record$Payer, "--"))
+      ),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_delete_expense", "Delete", class = "btn btn-danger")
+      )
+    ))
   })
 
   observeEvent(input$add_budget, {
@@ -515,7 +545,91 @@ server <- function(input, output, session) {
       return()
     }
 
-    updated <- current[-valid, , drop = FALSE]
+    row_idx <- valid[1]
+    record <- current[row_idx, , drop = FALSE]
+    pending_budget_delete(list(row_data = record))
+
+    showModal(modalDialog(
+      title = "Delete budget",
+      easyClose = FALSE,
+      size = "m",
+      tags$p("Are you sure you want to delete this budget?"),
+      tags$ul(
+        tags$li(strong("Category:"), record$Category),
+        tags$li(strong("Subcategory:"), format_subcategory(record$Subcategory)),
+        tags$li(strong("Limit:"), scales::dollar(record$Limit))
+      ),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_delete_budget", "Delete", class = "btn btn-danger")
+      )
+    ))
+  })
+
+  observeEvent(input$confirm_delete_expense, {
+    info <- pending_expense_delete()
+    pending_expense_delete(NULL)
+    removeModal()
+
+    if (is.null(info)) {
+      return()
+    }
+
+    current <- expenses()
+    if (nrow(current) == 0) {
+      showNotification("Selected expense is no longer available.", type = "error")
+      return()
+    }
+
+    record <- info$row_data
+    match_idx <- which(
+      current$Date == record$Date &
+        current$Description == record$Description &
+        current$Category == record$Category &
+        current$Subcategory == record$Subcategory &
+        current$Amount == record$Amount &
+        current$Payer == record$Payer
+    )
+
+    if (length(match_idx) == 0) {
+      showNotification("Selected expense is no longer available.", type = "error")
+      return()
+    }
+
+    updated <- current[-match_idx[1], , drop = FALSE]
+    expenses(updated)
+    write_expenses(updated)
+    showNotification("Expense deleted.", type = "message")
+  })
+
+  observeEvent(input$confirm_delete_budget, {
+    info <- pending_budget_delete()
+    pending_budget_delete(NULL)
+    removeModal()
+
+    if (is.null(info)) {
+      return()
+    }
+
+    current <- budgets()
+    if (nrow(current) == 0) {
+      showNotification("Selected budget is no longer available.", type = "error")
+      return()
+    }
+
+    record <- info$row_data
+    match_idx <- which(
+      current$Category == record$Category &
+        current$Subcategory == record$Subcategory &
+        current$Limit == record$Limit
+    )
+
+    if (length(match_idx) == 0) {
+      showNotification("Selected budget is no longer available.", type = "error")
+      return()
+    }
+
+    updated <- current[-match_idx[1], , drop = FALSE]
     budgets(updated)
     write_budgets(updated)
     showNotification("Budget deleted.", type = "message")
@@ -548,21 +662,20 @@ server <- function(input, output, session) {
   })
 
   output$expense_table <- renderDT({
-    data <- expenses() %>%
-      mutate(Subcategory = format_subcategory(Subcategory))
+    data <- format_expense_table_data(expenses())
 
     datatable(
       data,
       rownames = FALSE,
       options = list(pageLength = 10, lengthMenu = c(5, 10, 20)),
-      selection = "single"
+      selection = "single",
+      editable = list(target = "cell")
     ) %>%
       formatCurrency("Amount", currency = "$", interval = 3, mark = ",", digits = 2)
   })
 
   output$budget_table <- renderDT({
-    data <- budgets() %>%
-      mutate(Subcategory = format_subcategory(Subcategory))
+    data <- format_budget_table_data(budgets())
 
     validate(need(nrow(data) > 0, "Add budgets to track your plan."))
 
@@ -570,9 +683,135 @@ server <- function(input, output, session) {
       data,
       rownames = FALSE,
       options = list(pageLength = 10, lengthMenu = c(5, 10, 20)),
-      selection = "single"
+      selection = "single",
+      editable = list(target = "cell")
     ) %>%
       formatCurrency("Limit", currency = "$", interval = 3, mark = ",", digits = 2)
+  })
+
+  expense_proxy <- dataTableProxy("expense_table")
+  budget_proxy <- dataTableProxy("budget_table")
+
+  observeEvent(input$expense_table_cell_edit, {
+    info <- input$expense_table_cell_edit
+    df <- expenses()
+
+    if (is.null(info$row) || is.null(info$col) || info$row < 1 || info$row > nrow(df)) {
+      DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    column <- names(df)[info$col]
+    value <- info$value
+
+    parse_amount <- function(x) {
+      as.numeric(gsub("[^0-9.-]", "", x))
+    }
+
+    updated_value <- switch(
+      column,
+      Date = {
+        parsed <- as.Date(value)
+        if (is.na(parsed)) {
+          showNotification("Enter a valid date (YYYY-MM-DD).", type = "error")
+          return(DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE))
+        }
+        parsed
+      },
+      Amount = {
+        parsed <- parse_amount(value)
+        if (is.na(parsed) || parsed <= 0) {
+          showNotification("Enter a positive amount.", type = "error")
+          return(DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE))
+        }
+        parsed
+      },
+      Subcategory = {
+        cleaned <- trimws(value)
+        if (!nzchar(cleaned) || identical(cleaned, "(Unspecified)")) {
+          ""
+        } else {
+          clean_subcategory(cleaned)
+        }
+      },
+      Category = {
+        cleaned <- trimws(value)
+        if (!nzchar(cleaned)) {
+          showNotification("Category cannot be empty.", type = "error")
+          return(DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE))
+        }
+        cleaned
+      },
+      Description = trimws(value),
+      Payer = trimws(value),
+      value
+    )
+
+    if (is.null(updated_value)) {
+      return()
+    }
+
+    df[info$row, column] <- updated_value
+    df <- df %>% arrange(Date)
+    expenses(df)
+    write_expenses(df)
+    DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
+  })
+
+  observeEvent(input$budget_table_cell_edit, {
+    info <- input$budget_table_cell_edit
+    df <- budgets()
+
+    if (is.null(info$row) || is.null(info$col) || info$row < 1 || info$row > nrow(df)) {
+      DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    column <- names(df)[info$col]
+    value <- info$value
+
+    parse_amount <- function(x) {
+      as.numeric(gsub("[^0-9.-]", "", x))
+    }
+
+    updated_value <- switch(
+      column,
+      Limit = {
+        parsed <- parse_amount(value)
+        if (is.na(parsed) || parsed < 0) {
+          showNotification("Enter a non-negative limit.", type = "error")
+          return(DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE))
+        }
+        parsed
+      },
+      Category = {
+        cleaned <- trimws(value)
+        if (!nzchar(cleaned)) {
+          showNotification("Category cannot be empty.", type = "error")
+          return(DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE))
+        }
+        cleaned
+      },
+      Subcategory = {
+        cleaned <- trimws(value)
+        if (!nzchar(cleaned) || identical(cleaned, "(Unspecified)")) {
+          ""
+        } else {
+          clean_subcategory(cleaned)
+        }
+      },
+      value
+    )
+
+    if (is.null(updated_value)) {
+      return()
+    }
+
+    df[info$row, column] <- updated_value
+    df <- df %>% arrange(Category, Subcategory)
+    budgets(df)
+    write_budgets(df)
+    DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
   })
 
   output$income_summary <- renderUI({
@@ -791,30 +1030,25 @@ server <- function(input, output, session) {
     summary <- full_join(expense_summary, budget_summary, by = "Category") %>%
       mutate(
         Total = replace_na(Total, 0),
-        Fill = if_else(!is.na(Limit) & Total > Limit, "#d73027", "#1b9e77")
+        Limit = replace_na(Limit, 0),
+        Percent = if_else(Limit > 0, (Total / Limit) * 100, if_else(Total > 0, 100, 0)),
+        Fill = if_else((Limit > 0 & Total > Limit) | (Limit == 0 & Total > 0), "#d73027", "#1b9e77")
       ) %>%
-      arrange(Total)
+      arrange(Percent)
 
     validate(need(nrow(summary) > 0, "Add expenses or budgets to see the plot."))
 
-    ggplot(summary, aes(x = reorder(Category, Total), y = Total)) +
+    max_percent <- max(summary$Percent, na.rm = TRUE)
+    if (!is.finite(max_percent)) {
+      max_percent <- 0
+    }
+    upper_limit <- max(100, ceiling(max_percent / 10) * 10)
+
+    ggplot(summary, aes(x = reorder(Category, Percent), y = Percent)) +
       geom_col(aes(fill = Fill), show.legend = FALSE) +
-      geom_segment(
-        data = summary %>% filter(!is.na(Limit)),
-        aes(
-          x = reorder(Category, Total),
-          xend = reorder(Category, Total),
-          y = 0,
-          yend = Limit
-        ),
-        inherit.aes = FALSE,
-        linetype = "dashed",
-        color = "#333333",
-        linewidth = 0.8
-      ) +
-      coord_flip() +
-      labs(x = "Category", y = "Total spent", title = "Spending by category") +
-      scale_y_continuous(labels = dollar_format()) +
+      geom_hline(yintercept = 100, linetype = "dashed", color = "#333333", linewidth = 0.8) +
+      labs(x = "Category", y = "Percent of budget", title = "Spending by category") +
+      scale_y_continuous(labels = scales::label_percent(scale = 1), limits = c(0, upper_limit)) +
       scale_fill_identity() +
       theme_minimal(base_size = 14)
   })
