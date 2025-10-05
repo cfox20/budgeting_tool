@@ -38,8 +38,17 @@ empty_budgets <- tibble::tibble(
 default_payers <- c("Joint", "Partner 1", "Partner 2")
 
 clean_subcategory <- function(x) {
+  if (is.null(x)) {
+    return("")
+  }
+
   x <- tidyr::replace_na(x, "")
   trimws(x)
+}
+
+display_subcategory <- function(value) {
+  value <- clean_subcategory(value)
+  ifelse(nzchar(value), value, "")
 }
 
 load_expenses <- function() {
@@ -147,11 +156,11 @@ format_subcategory <- function(value) {
 }
 
 format_expense_table_data <- function(df) {
-  df %>% mutate(Subcategory = format_subcategory(Subcategory))
+  df %>% mutate(Subcategory = display_subcategory(Subcategory))
 }
 
 format_budget_table_data <- function(df) {
-  df %>% mutate(Subcategory = format_subcategory(Subcategory))
+  df %>% mutate(Subcategory = display_subcategory(Subcategory))
 }
 
 # User interface --------------------------------------------------------------
@@ -177,7 +186,11 @@ ui <- navbarPage(
             "expense_subcategory",
             "Subcategory",
             choices = NULL,
-            options = list(placeholder = "Select or add a subcategory", create = TRUE)
+            options = list(
+              placeholder = "Select or add a subcategory",
+              create = TRUE,
+              allowEmptyOption = TRUE
+            )
           ),
           numericInput("expense_amount", "Amount", value = NA, min = 0, step = 0.01),
           selectizeInput(
@@ -223,7 +236,11 @@ ui <- navbarPage(
             "budget_subcategory",
             "Subcategory",
             choices = NULL,
-            options = list(placeholder = "Select or add a subcategory", create = TRUE)
+            options = list(
+              placeholder = "Select or add a subcategory",
+              create = TRUE,
+              allowEmptyOption = TRUE
+            )
           ),
           numericInput("budget_limit", "Monthly limit", value = NA, min = 0, step = 10),
           actionButton("add_budget", "Save budget", class = "btn-primary")
@@ -357,7 +374,7 @@ server <- function(input, output, session) {
     category <- input$expense_category
 
     if (is.null(category) || !nzchar(category)) {
-      updateSelectizeInput(session, "expense_subcategory", choices = character(0), selected = NULL, server = FALSE)
+      updateSelectizeInput(session, "expense_subcategory", choices = "", selected = "", server = FALSE)
       return()
     }
 
@@ -372,15 +389,18 @@ server <- function(input, output, session) {
     subchoices <- sort(unique(c(clean_subcategory(expense_subs), clean_subcategory(budget_subs))))
 
     current <- clean_subcategory(input$expense_subcategory)
+    choices <- unique(c("", subchoices))
     if (nzchar(current)) {
-      subchoices <- unique(c(subchoices, current))
+      choices <- unique(c(choices, current))
     }
+
+    named_choices <- structure(choices, names = choices)
 
     updateSelectizeInput(
       session,
       "expense_subcategory",
-      choices = subchoices,
-      selected = if (nzchar(current)) current else NULL,
+      choices = named_choices,
+      selected = if (nzchar(current)) current else "",
       server = FALSE
     )
   })
@@ -389,7 +409,7 @@ server <- function(input, output, session) {
     category <- input$budget_category
 
     if (is.null(category) || !nzchar(category)) {
-      updateSelectizeInput(session, "budget_subcategory", choices = character(0), selected = NULL, server = FALSE)
+      updateSelectizeInput(session, "budget_subcategory", choices = "", selected = "", server = FALSE)
       return()
     }
 
@@ -400,15 +420,18 @@ server <- function(input, output, session) {
       sort()
 
     current <- clean_subcategory(input$budget_subcategory)
+    choices <- unique(c("", subchoices))
     if (nzchar(current)) {
-      subchoices <- unique(c(subchoices, current))
+      choices <- unique(c(choices, current))
     }
+
+    named_choices <- structure(choices, names = choices)
 
     updateSelectizeInput(
       session,
       "budget_subcategory",
-      choices = subchoices,
-      selected = if (nzchar(current)) current else NULL,
+      choices = named_choices,
+      selected = if (nzchar(current)) current else "",
       server = FALSE
     )
   })
@@ -696,12 +719,33 @@ server <- function(input, output, session) {
     info <- input$expense_table_cell_edit
     df <- expenses()
 
-    if (is.null(info$row) || is.null(info$col) || info$row < 1 || info$row > nrow(df)) {
+    if (is.null(info$row) || is.null(info$col)) {
       DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
       return()
     }
 
-    column <- names(df)[info$col]
+    row_idx <- as.integer(info$row)
+    rows_all <- input$expense_table_rows_all
+    if (!is.null(rows_all)) {
+      if (row_idx < 1 || row_idx > length(rows_all)) {
+        DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
+        return()
+      }
+      row_idx <- as.integer(rows_all[row_idx])
+    }
+
+    if (is.na(row_idx) || row_idx < 1 || row_idx > nrow(df)) {
+      DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    col_idx <- as.integer(info$col)
+    if (is.na(col_idx) || col_idx < 1 || col_idx > ncol(df)) {
+      DT::replaceData(expense_proxy, format_expense_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    column <- names(df)[col_idx]
     value <- info$value
 
     parse_amount <- function(x) {
@@ -751,7 +795,7 @@ server <- function(input, output, session) {
       return()
     }
 
-    df[info$row, column] <- updated_value
+    df[row_idx, column] <- updated_value
     df <- df %>% arrange(Date)
     expenses(df)
     write_expenses(df)
@@ -762,12 +806,33 @@ server <- function(input, output, session) {
     info <- input$budget_table_cell_edit
     df <- budgets()
 
-    if (is.null(info$row) || is.null(info$col) || info$row < 1 || info$row > nrow(df)) {
+    if (is.null(info$row) || is.null(info$col)) {
       DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
       return()
     }
 
-    column <- names(df)[info$col]
+    row_idx <- as.integer(info$row)
+    rows_all <- input$budget_table_rows_all
+    if (!is.null(rows_all)) {
+      if (row_idx < 1 || row_idx > length(rows_all)) {
+        DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
+        return()
+      }
+      row_idx <- as.integer(rows_all[row_idx])
+    }
+
+    if (is.na(row_idx) || row_idx < 1 || row_idx > nrow(df)) {
+      DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    col_idx <- as.integer(info$col)
+    if (is.na(col_idx) || col_idx < 1 || col_idx > ncol(df)) {
+      DT::replaceData(budget_proxy, format_budget_table_data(df), resetPaging = FALSE, rownames = FALSE)
+      return()
+    }
+
+    column <- names(df)[col_idx]
     value <- info$value
 
     parse_amount <- function(x) {
@@ -807,7 +872,7 @@ server <- function(input, output, session) {
       return()
     }
 
-    df[info$row, column] <- updated_value
+    df[row_idx, column] <- updated_value
     df <- df %>% arrange(Category, Subcategory)
     budgets(df)
     write_budgets(df)
