@@ -127,15 +127,14 @@ if (startsWith(sysname, "win")) {
   if (is.null(python_bin)) {
     stop("Python 3 is required but was not found on PATH.")
   }
-  sh_quote <- function(x) {
-    # Quote for POSIX shell contexts. Replace ' with '\'' per shell escaping rules.
-    sprintf("'%s'", gsub("'", "'\\''", x, fixed = TRUE))
+  quote_arg <- function(x) {
+    x <- normalizePath(x, winslash = "/", mustWork = TRUE)
+    sprintf('"%s"', gsub('"', '\\"', x, fixed = TRUE))
   }
-  launch_cmd <- sprintf(
-    "cd %s && %s %s",
-    sh_quote(repo_dir),
-    sh_quote(python_bin),
-    sh_quote(runner)
+  exec_cmd <- sprintf(
+    "%s %s",
+    quote_arg(python_bin),
+    quote_arg(runner)
   )
   exec_cmd <- sprintf("bash -lc %s", sh_quote(launch_cmd))
   icon_entry <- sprintf("Icon=%s", icon_ico)
