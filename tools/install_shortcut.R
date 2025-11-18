@@ -24,28 +24,28 @@ icon_png <- if (file.exists(icon_png_path)) {
   NULL
 }
 icon_ico_path <- file.path(repo_dir, "resources", "budgeting_tool.ico")
-icon_bytes_source <- file.path(repo_dir, "resources", "icon_bytes.R")
+# icon_bytes_source <- file.path(repo_dir, "resources", "icon_bytes.R")
 
-if (!file.exists(icon_bytes_source)) {
-  stop("Icon byte source not found at ", icon_bytes_source, ".")
-}
+# if (!file.exists(icon_bytes_source)) {
+#   stop("Icon byte source not found at ", icon_bytes_source, ".")
+# }
 
-source(icon_bytes_source)
+# source(icon_bytes_source)
 
-if (!exists("budgeting_tool_icon_bytes")) {
-  stop("budgeting_tool_icon_bytes() was not defined after sourcing ", icon_bytes_source, ".")
-}
+# if (!exists("budgeting_tool_icon_bytes")) {
+#   stop("budgeting_tool_icon_bytes() was not defined after sourcing ", icon_bytes_source, ".")
+# }
 
-ico_bytes <- budgeting_tool_icon_bytes()
-if (!inherits(ico_bytes, "raw")) {
-  stop("budgeting_tool_icon_bytes() must return a raw vector.")
-}
+# ico_bytes <- budgeting_tool_icon_bytes()
+# if (!inherits(ico_bytes, "raw")) {
+#   stop("budgeting_tool_icon_bytes() must return a raw vector.")
+# }
 
-existing_size <- suppressWarnings(file.size(icon_ico_path))
-if (is.na(existing_size) || existing_size != length(ico_bytes)) {
-  dir.create(dirname(icon_ico_path), showWarnings = FALSE, recursive = TRUE)
-  writeBin(ico_bytes, icon_ico_path, useBytes = TRUE)
-}
+# existing_size <- suppressWarnings(file.size(icon_ico_path))
+# if (is.na(existing_size) || existing_size != length(ico_bytes)) {
+#   dir.create(dirname(icon_ico_path), showWarnings = FALSE, recursive = TRUE)
+#   writeBin(ico_bytes, icon_ico_path, useBytes = TRUE)
+# }
 
 icon_ico <- normalizePath(icon_ico_path, winslash = "/", mustWork = TRUE)
 
