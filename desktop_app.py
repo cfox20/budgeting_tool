@@ -118,6 +118,13 @@ def main(argv: list[str] | None = None) -> int:
 
     window = webview.create_window("Household Budgeting", url)
 
+    def on_closed() -> None:
+        """Ensure the Shiny process stops if the window is closed."""
+
+        terminate_process(process)
+
+    window.events.closed += on_closed  # type: ignore[attr-defined]
+
     try:
         webview.start()
     finally:

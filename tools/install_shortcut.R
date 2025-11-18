@@ -13,17 +13,15 @@ if (is.null(script_path)) {
 }
 script_path <- normalizePath(script_path, winslash = "/", mustWork = TRUE)
 repo_dir <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
-runner <- file.path(repo_dir, "run_app.R")
+runner <- file.path(repo_dir, "desktop_app.py")
 if (!file.exists(runner)) {
-  stop("Could not find run_app.R at ", runner)
+  stop("Could not find desktop_app.py at ", runner)
 }
-icon_png_path <- file.path(repo_dir, "app", "www", "icon.png")
-icon_png <- if (file.exists(icon_png_path)) {
-  normalizePath(icon_png_path, winslash = "/", mustWork = TRUE)
-} else {
-  NULL
+
+icon_ico_path <- file.path(repo_dir, "resources", "logo.ico")
+if (!file.exists(icon_ico_path)) {
+  stop("Could not find logo at ", icon_ico_path)
 }
-icon_ico_path <- file.path(repo_dir, "resources", "budgeting_tool.ico")
 # icon_bytes_source <- file.path(repo_dir, "resources", "icon_bytes.R")
 
 # if (!file.exists(icon_bytes_source)) {
@@ -62,10 +60,17 @@ if (!dir.exists(desktop_path)) {
 
 if (startsWith(sysname, "win")) {
   shortcut_path <- normalizePath(file.path(desktop_path, "Budgeting Tool.lnk"), winslash = "\\", mustWork = FALSE)
-  target <- normalizePath(file.path(R.home("bin"), "Rscript.exe"), winslash = "\\", mustWork = TRUE)
-  if (!file.exists(target)) {
-    stop("Rscript.exe was not found at ", target, ". Ensure R is installed and available.")
+  find_python <- function() {
+    candidates <- c("pythonw.exe", "python.exe")
+    for (candidate in candidates) {
+      resolved <- Sys.which(candidate)
+      if (!is.na(resolved) && nzchar(resolved)) {
+        return(normalizePath(resolved, winslash = "\\", mustWork = TRUE))
+      }
+    }
+    stop("Could not find python.exe or pythonw.exe on PATH. Please install Python 3.")
   }
+  target <- find_python()
   working_dir <- normalizePath(repo_dir, winslash = "\\", mustWork = TRUE)
   runner_win <- normalizePath(runner, winslash = "\\", mustWork = TRUE)
   icon_win <- normalizePath(icon_ico, winslash = "\\", mustWork = TRUE)
@@ -76,7 +81,7 @@ if (startsWith(sysname, "win")) {
     sprintf('$Shortcut.TargetPath = "%s"', target),
     sprintf('$Shortcut.WorkingDirectory = "%s"', working_dir),
     sprintf('$Shortcut.IconLocation = "%s"', icon_win),
-    sprintf("$Shortcut.Arguments = '--vanilla \"%s\"'", runner_win),
+    sprintf('$Shortcut.Arguments = "\"%s\""', runner_win),
     "$Shortcut.Save()"
   )
   tmp <- tempfile(fileext = ".ps1")
@@ -92,26 +97,30 @@ if (startsWith(sysname, "win")) {
   lines <- c(
     "#!/bin/bash",
     sprintf('cd "%s"', repo_dir),
-    '"$(which Rscript)" run_app.R'
+    'PYTHON_BIN="$(command -v python3)"',
+    'if [ -z "$PYTHON_BIN" ]; then',
+    '  PYTHON_BIN="$(command -v python)"',
+    'fi',
+    'if [ -z "$PYTHON_BIN" ]; then',
+    '  echo "Python 3 is required but was not found on PATH."',
+    '  exit 1',
+    'fi',
+    '"$PYTHON_BIN" desktop_app.py'
   )
   writeLines(lines, shortcut_path, useBytes = TRUE)
   Sys.chmod(shortcut_path, mode = "0755")
+  icon_dest <- file.path(desktop_path, "Budgeting Tool.ico")
+  file.copy(icon_ico_path, icon_dest, overwrite = TRUE)
   message("Shortcut script created at ", shortcut_path)
-  if (!is.null(icon_png)) {
-    file.copy(icon_png, file.path(desktop_path, "Budgeting Tool.png"), overwrite = TRUE)
-    message("macOS does not allow setting a custom icon programmatically without additional tools. A copy of the app icon was saved next to the shortcut so you can assign it manually (Get Info → drag the icon).")
-  } else {
-    message("Add app/www/icon.png if you would like to assign a custom icon to the shortcut.")
-  }
+  message("macOS does not support applying .ico icons automatically; a copy of the logo was saved next to the shortcut so you can assign it manually via Get Info → drag the icon.")
 } else {
   shortcut_path <- file.path(desktop_path, "budgeting-tool.desktop")
   repo_escaped <- gsub('"', '\\"', repo_dir, fixed = TRUE)
-  exec_cmd <- sprintf('bash -c "cd \"%s\" && Rscript run_app.R"', repo_escaped)
-  icon_entry <- if (!is.null(icon_png)) {
-    sprintf("Icon=%s", icon_png)
-  } else {
-    "Icon=utilities-terminal"
-  }
+  exec_cmd <- sprintf(
+    'bash -c "cd \"%s\" && if command -v python3 >/dev/null 2>&1; then PY=python3; elif command -v python >/dev/null 2>&1; then PY=python; else echo Python 3 is required but was not found.; exit 1; fi; exec \"$PY\" desktop_app.py"',
+    repo_escaped
+  )
+  icon_entry <- sprintf("Icon=%s", icon_ico)
   desktop_entry <- c(
     "[Desktop Entry]",
     "Type=Application",
