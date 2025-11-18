@@ -81,7 +81,8 @@ if (startsWith(sysname, "win")) {
     sprintf('$Shortcut.TargetPath = "%s"', target),
     sprintf('$Shortcut.WorkingDirectory = "%s"', working_dir),
     sprintf('$Shortcut.IconLocation = "%s"', icon_win),
-    sprintf('$Shortcut.Arguments = "\"%s\""', runner_win),
+    # <-- change this line:
+    sprintf('$Shortcut.Arguments = "%s"', runner_win),
     "$Shortcut.Save()"
   )
   tmp <- tempfile(fileext = ".ps1")
