@@ -136,6 +136,7 @@ if (startsWith(sysname, "win")) {
     quote_arg(python_bin),
     quote_arg(runner)
   )
+  exec_cmd <- sprintf("bash -lc %s", sh_quote(launch_cmd))
   icon_entry <- sprintf("Icon=%s", icon_ico)
   desktop_entry <- c(
     "[Desktop Entry]",
