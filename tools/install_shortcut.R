@@ -116,10 +116,25 @@ if (startsWith(sysname, "win")) {
   message("macOS does not support applying .ico icons automatically; a copy of the logo was saved next to the shortcut so you can assign it manually via Get Info → drag the icon.")
 } else {
   shortcut_path <- file.path(desktop_path, "budgeting-tool.desktop")
-  repo_escaped <- gsub('"', '\\"', repo_dir, fixed = TRUE)
+  python_bin <- NULL
+  for (candidate in c("python3", "python")) {
+    resolved <- Sys.which(candidate)
+    if (!is.na(resolved) && nzchar(resolved)) {
+      python_bin <- normalizePath(resolved, winslash = "/", mustWork = TRUE)
+      break
+    }
+  }
+  if (is.null(python_bin)) {
+    stop("Python 3 is required but was not found on PATH.")
+  }
+  quote_arg <- function(x) {
+    x <- normalizePath(x, winslash = "/", mustWork = TRUE)
+    sprintf('"%s"', gsub('"', '\\"', x, fixed = TRUE))
+  }
   exec_cmd <- sprintf(
-    'bash -c "cd \"%s\" && if command -v python3 >/dev/null 2>&1; then PY=python3; elif command -v python >/dev/null 2>&1; then PY=python; else echo Python 3 is required but was not found.; exit 1; fi; exec \"$PY\" desktop_app.py"',
-    repo_escaped
+    "%s %s",
+    quote_arg(python_bin),
+    quote_arg(runner)
   )
   icon_entry <- sprintf("Icon=%s", icon_ico)
   desktop_entry <- c(
