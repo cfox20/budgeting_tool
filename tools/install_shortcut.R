@@ -1,89 +1,76 @@
 #!/usr/bin/env Rscript
 
-args <- commandArgs(trailingOnly = FALSE)
-script_path <- NULL
-for (arg in args) {
-  if (startsWith(arg, "--file=")) {
-    script_path <- sub("^--file=", "", arg)
-    break
+# ------------------------------- helpers ------------------------------------
+current_script <- function() {
+  args <- commandArgs(trailingOnly = FALSE)
+  matches <- grep("^--file=", args)
+  if (length(matches) == 0) {
+    stop("Unable to determine script location; please run via Rscript.")
   }
+  normalizePath(sub("^--file=", "", args[matches[length(matches)]]), winslash = "/", mustWork = TRUE)
 }
-if (is.null(script_path)) {
-  stop("Unable to determine script location; please run via Rscript.")
+
+find_python <- function(candidates) {
+  for (candidate in candidates) {
+    resolved <- Sys.which(candidate)
+    if (!is.na(resolved) && nzchar(resolved)) {
+      return(normalizePath(resolved, winslash = "/", mustWork = TRUE))
+    }
+  }
+  stop("Python 3 was not found on PATH.")
 }
-script_path <- normalizePath(script_path, winslash = "/", mustWork = TRUE)
+
+ensure_icon <- function(path) {
+  if (!file.exists(path)) {
+    stop("Logo not found at ", path)
+  }
+  normalizePath(path, winslash = "/", mustWork = TRUE)
+}
+
+# ------------------------------- setup ---------------------------------------
+script_path <- current_script()
 repo_dir <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
 runner <- file.path(repo_dir, "desktop_app.py")
 if (!file.exists(runner)) {
   stop("Could not find desktop_app.py at ", runner)
 }
+icon_path <- ensure_icon(file.path(repo_dir, "resources", "logo.ico"))
 
-icon_ico_path <- file.path(repo_dir, "resources", "logo.ico")
-if (!file.exists(icon_ico_path)) {
-  stop("Could not find logo at ", icon_ico_path)
-}
-# icon_bytes_source <- file.path(repo_dir, "resources", "icon_bytes.R")
-
-# if (!file.exists(icon_bytes_source)) {
-#   stop("Icon byte source not found at ", icon_bytes_source, ".")
-# }
-
-# source(icon_bytes_source)
-
-# if (!exists("budgeting_tool_icon_bytes")) {
-#   stop("budgeting_tool_icon_bytes() was not defined after sourcing ", icon_bytes_source, ".")
-# }
-
-# ico_bytes <- budgeting_tool_icon_bytes()
-# if (!inherits(ico_bytes, "raw")) {
-#   stop("budgeting_tool_icon_bytes() must return a raw vector.")
-# }
-
-# existing_size <- suppressWarnings(file.size(icon_ico_path))
-# if (is.na(existing_size) || existing_size != length(ico_bytes)) {
-#   dir.create(dirname(icon_ico_path), showWarnings = FALSE, recursive = TRUE)
-#   writeBin(ico_bytes, icon_ico_path, useBytes = TRUE)
-# }
-
-icon_ico <- normalizePath(icon_ico_path, winslash = "/", mustWork = TRUE)
-
-desktop_path <- NULL
-sysname <- tolower(Sys.info()["sysname"])
-if (startsWith(sysname, "win")) {
-  desktop_path <- file.path(Sys.getenv("USERPROFILE"), "Desktop")
+desktop_dir <- if (startsWith(tolower(Sys.info()["sysname"]), "win")) {
+  file.path(Sys.getenv("USERPROFILE"), "Desktop")
 } else {
-  desktop_path <- path.expand("~/Desktop")
+  path.expand("~/Desktop")
 }
-if (!dir.exists(desktop_path)) {
-  stop("Desktop folder not found at ", desktop_path, ". Please create it or adjust the script.")
+if (!dir.exists(desktop_dir)) {
+  stop("Desktop folder not found at ", desktop_dir)
 }
 
+python_candidates <- if (startsWith(tolower(Sys.info()["sysname"]), "win")) {
+  c("pythonw.exe", "python.exe")
+} else {
+  c("python3", "python")
+}
+python_bin <- find_python(python_candidates)
+
+sysname <- tolower(Sys.info()["sysname"])
+
+# ------------------------------- windows -------------------------------------
 if (startsWith(sysname, "win")) {
-  shortcut_path <- normalizePath(file.path(desktop_path, "Budgeting Tool.lnk"), winslash = "\\", mustWork = FALSE)
-  find_python <- function() {
-    candidates <- c("pythonw.exe", "python.exe")
-    for (candidate in candidates) {
-      resolved <- Sys.which(candidate)
-      if (!is.na(resolved) && nzchar(resolved)) {
-        return(normalizePath(resolved, winslash = "\\", mustWork = TRUE))
-      }
-    }
-    stop("Could not find python.exe or pythonw.exe on PATH. Please install Python 3.")
-  }
-  target <- find_python()
+  shortcut_path <- normalizePath(file.path(desktop_dir, "Budgeting Tool.lnk"), winslash = "\\", mustWork = FALSE)
+  target <- normalizePath(python_bin, winslash = "\\", mustWork = TRUE)
   working_dir <- normalizePath(repo_dir, winslash = "\\", mustWork = TRUE)
   runner_win <- normalizePath(runner, winslash = "\\", mustWork = TRUE)
-  icon_win <- normalizePath(icon_ico, winslash = "\\", mustWork = TRUE)
+  icon_win <- normalizePath(icon_path, winslash = "\\", mustWork = TRUE)
   ps_lines <- c(
     "$ErrorActionPreference = 'Stop'",
-    "$WshShell = New-Object -ComObject WScript.Shell",
-    sprintf('$Shortcut = $WshShell.CreateShortcut("%s")', shortcut_path),
-    sprintf('$Shortcut.TargetPath = "%s"', target),
-    sprintf('$Shortcut.WorkingDirectory = "%s"', working_dir),
-    sprintf('$Shortcut.IconLocation = "%s"', icon_win),
-    # <-- change this line:
-    sprintf('$Shortcut.Arguments = "%s"', runner_win),
-    "$Shortcut.Save()"
+    "$shell = New-Object -ComObject WScript.Shell",
+    sprintf('$shortcut = $shell.CreateShortcut("%s")', shortcut_path),
+    sprintf('$shortcut.TargetPath = "%s"', target),
+    sprintf('$shortcut.Arguments = "%s"', runner_win),
+    sprintf('$shortcut.WorkingDirectory = "%s"', working_dir),
+    sprintf('$shortcut.IconLocation = "%s"', icon_win),
+    '$shortcut.WindowStyle = 7',
+    '$shortcut.Save()'
   )
   tmp <- tempfile(fileext = ".ps1")
   writeLines(ps_lines, tmp, useBytes = TRUE)
@@ -93,47 +80,43 @@ if (startsWith(sysname, "win")) {
     stop("Failed to create Windows shortcut: ", paste(res, collapse = "\n"))
   }
   message("Shortcut created at ", shortcut_path)
-} else if (sysname == "darwin") {
-  shortcut_path <- file.path(desktop_path, "Budgeting Tool.command")
-  lines <- c(
+  quit(status = 0)
+}
+
+# ------------------------------- macos ---------------------------------------
+if (sysname == "darwin") {
+  shortcut_path <- file.path(desktop_dir, "Budgeting Tool.command")
+  script_lines <- c(
     "#!/bin/bash",
     sprintf('cd "%s"', repo_dir),
-    'PYTHON_BIN="$(command -v python3)"',
-    'if [ -z "$PYTHON_BIN" ]; then',
-    '  PYTHON_BIN="$(command -v python)"',
-    'fi',
-    'if [ -z "$PYTHON_BIN" ]; then',
-    '  echo "Python 3 is required but was not found on PATH."',
-    '  exit 1',
-    'fi',
-    '"$PYTHON_BIN" desktop_app.py'
+    sprintf('"%s" "%s"', python_bin, basename(runner))
   )
-  writeLines(lines, shortcut_path, useBytes = TRUE)
+  writeLines(script_lines, shortcut_path, useBytes = TRUE)
   Sys.chmod(shortcut_path, mode = "0755")
-  icon_dest <- file.path(desktop_path, "Budgeting Tool.ico")
-  file.copy(icon_ico_path, icon_dest, overwrite = TRUE)
-  message("Shortcut script created at ", shortcut_path)
-  message("macOS does not support applying .ico icons automatically; a copy of the logo was saved next to the shortcut so you can assign it manually via Get Info → drag the icon.")
-} else {
-  shortcut_path <- file.path(desktop_path, "budgeting-tool.desktop")
-  repo_escaped <- gsub('"', '\\"', repo_dir, fixed = TRUE)
-  exec_cmd <- sprintf(
-    'bash -c "cd \"%s\" && if command -v python3 >/dev/null 2>&1; then PY=python3; elif command -v python >/dev/null 2>&1; then PY=python; else echo Python 3 is required but was not found.; exit 1; fi; exec \"$PY\" desktop_app.py"',
-    repo_escaped
-  )
-  icon_entry <- sprintf("Icon=%s", icon_ico)
-  desktop_entry <- c(
-    "[Desktop Entry]",
-    "Type=Application",
-    "Name=Budgeting Tool",
-    "Comment=Launch the Household Expense Tracker",
-    sprintf("Exec=%s", exec_cmd),
-    sprintf("Path=%s", repo_dir),
-    icon_entry,
-    "Terminal=false",
-    "Categories=Office;Finance;"
-  )
-  writeLines(desktop_entry, shortcut_path, useBytes = TRUE)
-  Sys.chmod(shortcut_path, mode = "0755")
-  message("Desktop launcher created at ", shortcut_path)
+  file.copy(icon_path, file.path(desktop_dir, "Budgeting Tool.ico"), overwrite = TRUE)
+  message("Shortcut created at ", shortcut_path)
+  message("macOS does not allow assigning .ico icons automatically; a copy of the logo was placed next to the shortcut so you can apply it manually via Get Info → drag the icon.")
+  quit(status = 0)
 }
+
+# ------------------------------- linux ---------------------------------------
+shortcut_path <- file.path(desktop_dir, "budgeting-tool.desktop")
+sh_quote <- function(x) {
+  sprintf("'%s'", gsub("'", "'\\''", x, fixed = TRUE))
+}
+launch_command <- sprintf("cd %s && %s %s", sh_quote(repo_dir), sh_quote(python_bin), sh_quote(runner))
+exec_line <- sprintf('bash -lc "%s"', gsub('([\\"$`])', '\\\\1', launch_command, perl = TRUE))
+desktop_entry <- c(
+  "[Desktop Entry]",
+  "Type=Application",
+  "Name=Budgeting Tool",
+  "Comment=Launch the budgeting tool",
+  sprintf("Exec=%s", exec_line),
+  sprintf("Path=%s", repo_dir),
+  sprintf("Icon=%s", icon_path),
+  "Terminal=false",
+  "Categories=Office;Finance;"
+)
+writeLines(desktop_entry, shortcut_path, useBytes = TRUE)
+Sys.chmod(shortcut_path, mode = "0755")
+message("Desktop launcher created at ", shortcut_path)
