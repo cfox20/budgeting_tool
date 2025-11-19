@@ -1,62 +1,78 @@
 #!/usr/bin/env Rscript
 
-args <- commandArgs(trailingOnly = FALSE)
-script_path <- NULL
-for (arg in args) {
-  if (startsWith(arg, "--file=")) {
-    script_path <- sub("^--file=", "", arg)
-    break
+current_script <- function() {
+  args <- commandArgs(trailingOnly = FALSE)
+  matches <- grep("^--file=", args)
+  if (length(matches) == 0) {
+    stop("Unable to determine script location; please run via Rscript.")
+  }
+  normalizePath(sub("^--file=", "", args[matches[length(matches)]]), winslash = "/", mustWork = TRUE)
+}
+
+ensure_package <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    message("Package '", pkg, "' not found; attempting to install from CRAN...")
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Package '", pkg, "' could not be loaded; please install it manually and re-run this script.")
   }
 }
-if (is.null(script_path)) {
-  stop("Unable to determine script location; please run via Rscript.")
+
+stop_if_not_windows <- function() {
+  if (!startsWith(tolower(Sys.info()["sysname"]), "win")) {
+    stop("RInno can only build Windows installers. Please run this script on Windows.")
+  }
 }
-script_path <- normalizePath(script_path, winslash = "/", mustWork = TRUE)
+
+script_path <- current_script()
 repo_dir <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
-runner <- file.path(repo_dir, "desktop_app.py")
-if (!file.exists(runner)) {
-  stop("Could not find desktop_app.py at ", runner)
+app_dir <- file.path(repo_dir, "app")
+app_entry <- file.path(repo_dir, "run_app.R")
+icon_path <- file.path(repo_dir, "resources", "logo.ico")
+installer_dir <- file.path(repo_dir, "installer")
+app_name <- "BudgetingTool"
+
+if (!dir.exists(app_dir) || !file.exists(file.path(app_dir, "app.R"))) {
+  stop("The Shiny application directory was not found at ", app_dir)
 }
 
-icon_ico_path <- file.path(repo_dir, "resources", "logo.ico")
-if (!file.exists(icon_ico_path)) {
-  stop("Could not find logo at ", icon_ico_path)
+if (!file.exists(app_entry)) {
+  stop("Launcher script not found at ", app_entry)
 }
-# icon_bytes_source <- file.path(repo_dir, "resources", "icon_bytes.R")
 
-# if (!file.exists(icon_bytes_source)) {
-#   stop("Icon byte source not found at ", icon_bytes_source, ".")
-# }
-
-# source(icon_bytes_source)
-
-# if (!exists("budgeting_tool_icon_bytes")) {
-#   stop("budgeting_tool_icon_bytes() was not defined after sourcing ", icon_bytes_source, ".")
-# }
-
-# ico_bytes <- budgeting_tool_icon_bytes()
-# if (!inherits(ico_bytes, "raw")) {
-#   stop("budgeting_tool_icon_bytes() must return a raw vector.")
-# }
-
-# existing_size <- suppressWarnings(file.size(icon_ico_path))
-# if (is.na(existing_size) || existing_size != length(ico_bytes)) {
-#   dir.create(dirname(icon_ico_path), showWarnings = FALSE, recursive = TRUE)
-#   writeBin(ico_bytes, icon_ico_path, useBytes = TRUE)
-# }
-
-icon_ico <- normalizePath(icon_ico_path, winslash = "/", mustWork = TRUE)
-
-desktop_path <- NULL
-sysname <- tolower(Sys.info()["sysname"])
-if (startsWith(sysname, "win")) {
-  desktop_path <- file.path(Sys.getenv("USERPROFILE"), "Desktop")
-} else {
-  desktop_path <- path.expand("~/Desktop")
+if (!file.exists(icon_path)) {
+  stop("Logo not found at ", icon_path)
 }
-if (!dir.exists(desktop_path)) {
-  stop("Desktop folder not found at ", desktop_path, ". Please create it or adjust the script.")
+
+dir.create(installer_dir, showWarnings = FALSE, recursive = TRUE)
+
+stop_if_not_windows()
+ensure_package("RInno")
+
+pkgs <- c("shiny", "DT", "readr", "dplyr", "tidyr", "lubridate", "ggplot2", "scales")
+
+missing_pkgs <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
+if (length(missing_pkgs) > 0) {
+  message("Installing missing application packages: ", paste(missing_pkgs, collapse = ", "))
+  install.packages(missing_pkgs, repos = "https://cloud.r-project.org")
 }
+
+message("Ensuring Inno Setup is available...")
+RInno::install_inno()
+
+message("Configuring RInno project...")
+RInno::setup_app(
+  app_name = app_name,
+  app_dir = app_dir,
+  dir_out = installer_dir,
+  pkgs = pkgs,
+  include_R = TRUE,
+  app_icon = icon_path,
+  app_desc = "Household budgeting tool",
+  files = c(app_entry, file.path(repo_dir, "desktop_app.py"), file.path(repo_dir, "resources"))
+)
 
 if (startsWith(sysname, "win")) {
   shortcut_path <- normalizePath(file.path(desktop_path, "Budgeting Tool.lnk"), winslash = "\\", mustWork = FALSE)
