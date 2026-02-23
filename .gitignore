@@ -1,7 +1,7 @@
-data/expenses.csv
-data/expenses_backup.csv
-data/income_sources.csv
+*.csv
 data/category_budget.csv
+data/expenses.csv
+data/income_sources.csv
 resources/budgeting_tool.ico
 .Rhistory
 .RData

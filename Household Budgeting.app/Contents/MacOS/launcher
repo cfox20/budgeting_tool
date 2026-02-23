@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Hardcoded project path
+PROJECT_DIR="/Users/carson/Documents/R_Projects/budgeting_tool_slater"
+
+# Locate Rscript
+if [ -f /usr/local/bin/Rscript ]; then
+    HS_RSCRIPT="/usr/local/bin/Rscript"
+elif [ -f /opt/homebrew/bin/Rscript ]; then
+    HS_RSCRIPT="/opt/homebrew/bin/Rscript"
+else
+    HS_RSCRIPT="/usr/bin/env Rscript"
+fi
+
+# Use AppleScript to tell Terminal to launch the app
+# This ensures we inherit Terminal's file permissions
+osascript <<EOD
+tell application "Terminal"
+    do script "cd '$PROJECT_DIR' && '$HS_RSCRIPT' run_app.R"
+    activate
+end tell
+EOD

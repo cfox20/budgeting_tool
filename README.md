@@ -61,8 +61,6 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 
 ## Notes
 
-- You can type new categories or payer names directly into the selectors; they will be remembered for future entries within the current session.
-- Use the reporting tab to focus on specific time periods and to monitor the distribution of your spending.
-- To restore from the backup manually, replace `data/expenses.csv` with `data/expenses_backup.csv` while the app is not running.
+## Acknowledgement
 
-Enjoy tracking your expenses!
+This project was entirely done using OpenAI's **Codex** and Google DeepMind's **Antigravity**.
