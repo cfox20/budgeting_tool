@@ -358,22 +358,44 @@ ui <- navbarPage(
           dateInput("expense_date", "Date", value = Sys.Date()),
           textInput("expense_description", "Description"),
           selectizeInput(
-            "expense_category",
-            "Category",
-            choices = NULL,
-            options = list(
-              placeholder = "Select or add a category",
-              create = TRUE
+            "expense_type",
+            "Expense Type",
+            choices = c("Monthly", "Goal"),
+            selected = "Monthly",
+            options = list(create = FALSE)
+          ),
+          conditionalPanel(
+            condition = "input.expense_type !== 'Goal'",
+            selectizeInput(
+              "expense_category",
+              "Category",
+              choices = NULL,
+              options = list(
+                placeholder = "Select or add a category",
+                create = TRUE
+              )
+            ),
+            selectizeInput(
+              "expense_subcategory",
+              "Subcategory",
+              choices = NULL,
+              options = list(
+                placeholder = "Select or add a subcategory",
+                create = TRUE,
+                allowEmptyOption = TRUE
+              )
             )
           ),
-          selectizeInput(
-            "expense_subcategory",
-            "Subcategory",
-            choices = NULL,
-            options = list(
-              placeholder = "Select or add a subcategory",
-              create = TRUE,
-              allowEmptyOption = TRUE
+          conditionalPanel(
+            condition = "input.expense_type === 'Goal'",
+            selectizeInput(
+              "expense_goal",
+              "Goal",
+              choices = NULL,
+              options = list(
+                placeholder = "Select a goal",
+                create = FALSE
+              )
             )
           ),
           numericInput(
@@ -1329,6 +1351,27 @@ server <- function(input, output, session) {
   })
 
   observe({
+    goal_choices <- goals() %>%
+      pull(Goal) %>%
+      unique() %>%
+      sort()
+
+    selected_goal <- input$expense_goal
+    if (!is.null(selected_goal) && nzchar(selected_goal) && !(selected_goal %in% goal_choices)) {
+      selected_goal <- ""
+    }
+
+    updateSelectizeInput(
+      session,
+      "expense_goal",
+      choices = goal_choices,
+      selected = selected_goal,
+      server = FALSE
+    )
+  })
+
+
+  observe({
     dates <- expenses()$Date
 
     # Always include current month in options, even if no expenses yet
@@ -1444,8 +1487,10 @@ server <- function(input, output, session) {
 
   observeEvent(input$add_expense, {
     description <- trimws(input$expense_description)
-    category <- trimws(input$expense_category)
-    subcategory <- trimws(input$expense_subcategory)
+    expense_type <- normalize_expense_type(input$expense_type)
+    selected_goal <- trimws(tidyr::replace_na(input$expense_goal, ""))
+    category <- if (expense_type == "Goal") selected_goal else trimws(input$expense_category)
+    subcategory <- if (expense_type == "Goal") "" else trimws(input$expense_subcategory)
     payer <- trimws(input$expense_payer)
     expense_type <- normalize_expense_type(input$expense_type)
 
@@ -1455,7 +1500,18 @@ server <- function(input, output, session) {
         "Please supply a date."
       ),
       need(nzchar(description), "Describe the expense."),
-      need(nzchar(category), "Choose a category."),
+      need(
+        expense_type != "Goal" || nzchar(selected_goal),
+        "Choose a goal for Goal expenses."
+      ),
+      need(
+        expense_type == "Goal" || nzchar(category),
+        "Choose a category."
+      ),
+      need(
+        expense_type != "Goal" || category %in% goals()$Goal,
+        "For Goal expenses, selected goal must exist."
+      ),
       need(
         expense_type != "Goal" || category %in% goals()$Goal,
         "For Goal expenses, Category must exactly match an existing goal name."
