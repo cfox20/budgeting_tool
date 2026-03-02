@@ -36,7 +36,8 @@ empty_expenses <- tibble::tibble(
   Category = character(),
   Subcategory = character(),
   Amount = numeric(),
-  Payer = character()
+  Payer = character(),
+  ExpenseType = character()
 )
 
 empty_budgets <- tibble::tibble(
@@ -72,6 +73,12 @@ empty_goal_budget_links <- tibble::tibble(
 
 default_payers <- c("Joint", "Caleb", "Rae")
 
+normalize_expense_type <- function(x) {
+  cleaned <- trimws(tidyr::replace_na(as.character(x), ""))
+  cleaned <- ifelse(tolower(cleaned) == "goal", "Goal", "Monthly")
+  cleaned
+}
+
 clean_subcategory <- function(x) {
   if (is.null(x)) {
     return("")
@@ -91,6 +98,8 @@ load_expenses <- function() {
     return(empty_expenses)
   }
 
+  has_expense_type_column <- FALSE
+
   df <- readr::read_csv(
     expenses_path,
     col_types = readr::cols(
@@ -99,7 +108,8 @@ load_expenses <- function() {
       Category = col_character(),
       Subcategory = col_character(),
       Amount = col_double(),
-      Payer = col_character()
+      Payer = col_character(),
+      ExpenseType = col_character()
     ),
     show_col_types = FALSE
   )
@@ -108,15 +118,28 @@ load_expenses <- function() {
     df$Subcategory <- ""
   }
 
-  df %>%
+  if (!"ExpenseType" %in% names(df)) {
+    df$ExpenseType <- "Monthly"
+  } else {
+    has_expense_type_column <- TRUE
+  }
+
+  cleaned_df <- df %>%
     mutate(
       Description = tidyr::replace_na(Description, ""),
       Category = tidyr::replace_na(Category, ""),
       Subcategory = clean_subcategory(Subcategory),
       Payer = tidyr::replace_na(Payer, ""),
-      Amount = replace_na(Amount, 0)
+      Amount = replace_na(Amount, 0),
+      ExpenseType = normalize_expense_type(ExpenseType)
     ) %>%
     arrange(desc(Date))
+
+  if (!has_expense_type_column) {
+    write_expenses(cleaned_df)
+  }
+
+  cleaned_df
 }
 
 load_budgets <- function() {
@@ -297,7 +320,11 @@ format_subcategory <- function(value) {
 }
 
 format_expense_table_data <- function(df) {
-  df %>% mutate(Subcategory = display_subcategory(Subcategory))
+  df %>%
+    mutate(
+      Subcategory = display_subcategory(Subcategory),
+      ExpenseType = normalize_expense_type(ExpenseType)
+    )
 }
 
 format_budget_table_data <- function(df) {
@@ -361,6 +388,13 @@ ui <- navbarPage(
             "Payer",
             choices = NULL,
             options = list(placeholder = "Select or add a payer", create = TRUE)
+          ),
+          selectizeInput(
+            "expense_type",
+            "Expense Type",
+            choices = c("Monthly", "Goal"),
+            selected = "Monthly",
+            options = list(create = FALSE)
           ),
           actionButton("add_expense", "Add expense", class = "btn-primary"),
           br(),
@@ -490,37 +524,13 @@ ui <- navbarPage(
           ),
           actionButton("add_goal", "Save Goal", class = "btn-primary"),
           hr(),
-          h4("Assign Budget Line to Goal"),
-          selectInput("goal_link_goal", "Goal", choices = character()),
-          selectizeInput(
-            "goal_link_category",
-            "Category",
-            choices = character(),
-            options = list(placeholder = "Select Category", create = TRUE)
-          ),
-          selectizeInput(
-            "goal_link_subcategory",
-            "Subcategory (optional)",
-            choices = character(),
-            options = list(placeholder = "Select Subcategory", create = TRUE)
-          ),
-          dateInput("goal_link_start", "Start Date", value = floor_date(Sys.Date(), "month")),
-          checkboxInput("goal_link_no_end", "No end date", value = TRUE),
-          dateInput("goal_link_end", "End Date", value = floor_date(Sys.Date() + months(1), "month")),
-          actionButton("add_goal_link", "Assign Line Item", class = "btn-info"),
-          br(),
-          br(),
           h4("Monthly Summary"),
           uiOutput("goals_monthly_summary")
         ),
         column(
           width = 8,
           h3("Your Goals"),
-          uiOutput("goals_list_ui"),
-          hr(),
-          h3("Assigned Budget Lines"),
-          actionButton("delete_goal_link", "Remove Selected Assignment", class = "btn-danger"),
-          DTOutput("goal_links_table")
+          uiOutput("goals_list_ui")
         )
       )
     )
@@ -628,52 +638,23 @@ server <- function(input, output, session) {
   monthly_income <- reactiveVal(load_monthly_income())
   goals <- reactiveVal(load_goals())
   goal_progress <- reactiveVal(load_goal_progress())
-  goal_budget_links <- reactiveVal(load_goal_budget_links())
 
-  get_goal_for_expense <- function(date, category, subcategory, links_df) {
-    if (nrow(links_df) == 0) {
-      return(NA_character_)
-    }
-
-    subcategory <- clean_subcategory(subcategory)
-
-    matches <- links_df %>%
-      filter(
-        Category == category,
-        (clean_subcategory(Subcategory) == subcategory | !nzchar(clean_subcategory(Subcategory))),
-        StartDate <= date,
-        (is.na(EndDate) | EndDate >= date)
-      ) %>%
-      mutate(
-        Specificity = if_else(nzchar(clean_subcategory(Subcategory)), 1L, 0L)
-      ) %>%
-      arrange(desc(Specificity), desc(StartDate))
-
-    if (nrow(matches) == 0) {
-      return(NA_character_)
-    }
-
-    matches$Goal[1]
-  }
-
-  classify_expenses_with_goal <- function(expense_df, links_df) {
+  classify_expenses_with_goal <- function(expense_df, goals_df) {
     if (nrow(expense_df) == 0) {
       return(expense_df %>% mutate(AllocatedGoal = character(), BudgetScope = character()))
     }
 
-    allocated <- vapply(seq_len(nrow(expense_df)), function(i) {
-      get_goal_for_expense(
-        expense_df$Date[i],
-        expense_df$Category[i],
-        expense_df$Subcategory[i],
-        links_df
-      )
-    }, character(1), USE.NAMES = FALSE)
+    goal_names <- tolower(trimws(goals_df$Goal))
 
     expense_df %>%
       mutate(
-        AllocatedGoal = replace_na(allocated, ""),
-        BudgetScope = if_else(nzchar(AllocatedGoal), "Goal", "Monthly")
+        ExpenseType = normalize_expense_type(ExpenseType),
+        BudgetScope = if_else(ExpenseType == "Goal", "Goal", "Monthly"),
+        AllocatedGoal = if_else(
+          BudgetScope == "Goal" & tolower(trimws(Category)) %in% goal_names,
+          Category,
+          ""
+        )
       )
   }
 
@@ -863,6 +844,7 @@ server <- function(input, output, session) {
             id = row_number(),
             Category = ifelse(is.na(Category), "", Category),
             Subcategory = "",
+            ExpenseType = "Monthly",
             Duplicate = FALSE
           )
     
@@ -1221,7 +1203,8 @@ server <- function(input, output, session) {
           Category = Category,
           Subcategory = Subcategory,
           Amount = Amount,
-          Payer = Payer
+          Payer = Payer,
+          ExpenseType = "Monthly"
         )
 
       updated <- bind_rows(expenses(), new_entries) %>% arrange(desc(Date))
@@ -1464,6 +1447,7 @@ server <- function(input, output, session) {
     category <- trimws(input$expense_category)
     subcategory <- trimws(input$expense_subcategory)
     payer <- trimws(input$expense_payer)
+    expense_type <- normalize_expense_type(input$expense_type)
 
     validate(
       need(
@@ -1472,6 +1456,10 @@ server <- function(input, output, session) {
       ),
       need(nzchar(description), "Describe the expense."),
       need(nzchar(category), "Choose a category."),
+      need(
+        expense_type != "Goal" || category %in% goals()$Goal,
+        "For Goal expenses, Category must exactly match an existing goal name."
+      ),
       need(
         !is.null(input$expense_amount) &&
           !is.na(input$expense_amount) &&
@@ -1486,7 +1474,8 @@ server <- function(input, output, session) {
       Category = category,
       Subcategory = clean_subcategory(subcategory),
       Amount = as.numeric(input$expense_amount),
-      Payer = payer
+      Payer = payer,
+      ExpenseType = expense_type
     )
 
     updated <- bind_rows(expenses(), entry) %>% arrange(desc(Date))
@@ -1501,6 +1490,7 @@ server <- function(input, output, session) {
       selected = NULL,
       server = FALSE
     )
+    updateSelectizeInput(session, "expense_type", selected = "Monthly", server = FALSE)
     showNotification("Expense added.", type = "message")
   })
 
@@ -1837,89 +1827,6 @@ server <- function(input, output, session) {
 
   # Goals Logic ---------------------------------------------------------------
 
-  observe({
-    updateSelectInput(session, "goal_link_goal", choices = goals()$Goal)
-  })
-
-  observe({
-    cats <- budgets() %>%
-      filter(nzchar(Category)) %>%
-      pull(Category) %>%
-      unique() %>%
-      sort()
-    updateSelectizeInput(session, "goal_link_category", choices = cats, server = TRUE)
-  })
-
-  observeEvent(input$goal_link_category, {
-    req(input$goal_link_category)
-    subcats <- budgets() %>%
-      filter(Category == input$goal_link_category, nzchar(Subcategory)) %>%
-      pull(Subcategory) %>%
-      unique() %>%
-      sort()
-    updateSelectizeInput(session, "goal_link_subcategory", choices = c("", subcats), selected = isolate(input$goal_link_subcategory), server = TRUE)
-  }, ignoreInit = TRUE)
-
-  observeEvent(input$add_goal_link, {
-    goal_name <- input$goal_link_goal
-    category <- trimws(input$goal_link_category)
-    subcategory <- clean_subcategory(input$goal_link_subcategory)
-    start_date <- as.Date(input$goal_link_start)
-    end_date <- if (isTRUE(input$goal_link_no_end)) as.Date(NA) else as.Date(input$goal_link_end)
-
-    validate(
-      need(nzchar(goal_name), "Choose a goal."),
-      need(goal_name %in% goals()$Goal, "Selected goal does not exist."),
-      need(nzchar(category), "Choose or enter a category."),
-      need(!is.na(start_date), "Choose a start date.")
-    )
-
-    if (!is.na(end_date) && end_date < start_date) {
-      showNotification("End date must be on or after start date.", type = "error")
-      return()
-    }
-
-    new_link <- tibble::tibble(
-      Goal = goal_name,
-      Category = category,
-      Subcategory = subcategory,
-      StartDate = start_date,
-      EndDate = end_date
-    )
-
-    updated <- bind_rows(goal_budget_links(), new_link) %>%
-      distinct(Goal, Category, Subcategory, StartDate, EndDate, .keep_all = TRUE) %>%
-      arrange(Goal, Category, Subcategory, desc(StartDate))
-
-    goal_budget_links(updated)
-    write_goal_budget_links(updated)
-    showNotification("Budget line assigned to goal.", type = "message")
-  })
-
-  output$goal_links_table <- renderDT({
-    data <- goal_budget_links() %>%
-      mutate(Subcategory = display_subcategory(Subcategory))
-
-    validate(need(nrow(data) > 0, "No assigned budget lines yet."))
-
-    datatable(
-      data,
-      rownames = FALSE,
-      options = list(pageLength = 8, lengthMenu = c(5, 8, 15)),
-      selection = "single"
-    )
-  })
-
-  observeEvent(input$delete_goal_link, {
-    selected <- input$goal_links_table_rows_selected
-    links <- goal_budget_links()
-    req(length(selected) == 1, nrow(links) > 0)
-
-    updated <- links[-selected, ]
-    goal_budget_links(updated)
-    write_goal_budget_links(updated)
-    showNotification("Goal assignment removed.", type = "warning")
-  })
 
   progress_bar <- function(value, label = "") {
     tags$div(
@@ -2039,10 +1946,6 @@ server <- function(input, output, session) {
       updated_prog <- goal_progress() %>% filter(Goal != goal_name)
       goal_progress(updated_prog)
       write_goal_progress(updated_prog)
-
-      updated_links <- goal_budget_links() %>% filter(Goal != goal_name)
-      goal_budget_links(updated_links)
-      write_goal_budget_links(updated_links)
 
       showNotification("Goal deleted.", type = "warning")
     }
@@ -2422,6 +2325,7 @@ server <- function(input, output, session) {
       },
       Description = trimws(value),
       Payer = trimws(value),
+      ExpenseType = normalize_expense_type(value),
       value
     )
 
@@ -2586,7 +2490,7 @@ server <- function(input, output, session) {
 
 
   scoped_expenses <- reactive({
-    classify_expenses_with_goal(expenses(), goal_budget_links())
+    classify_expenses_with_goal(expenses(), goals())
   })
 
   monthly_budget_expenses <- reactive({
@@ -2609,16 +2513,31 @@ server <- function(input, output, session) {
     validate(need(nrow(df) > 0, "No goal project spending in this period."))
 
     summary <- df %>%
+      filter(nzchar(AllocatedGoal)) %>%
       group_by(AllocatedGoal) %>%
       summarise(
         Total = sum(Amount, na.rm = TRUE),
         Transactions = dplyr::n(),
         .groups = "drop"
       ) %>%
+      left_join(
+        goals() %>% select(Goal, TargetAmount),
+        by = c("AllocatedGoal" = "Goal")
+      ) %>%
+      mutate(
+        `Goal Target` = TargetAmount,
+        `Progress %` = if_else(
+          !is.na(`Goal Target`) & `Goal Target` > 0,
+          pmin(100, (Total / `Goal Target`) * 100),
+          NA_real_
+        )
+      ) %>%
+      select(`Goal` = AllocatedGoal, Total, Transactions, `Goal Target`, `Progress %`) %>%
       arrange(desc(Total))
 
     datatable(summary, rownames = FALSE, options = list(pageLength = 8, lengthMenu = c(5, 8, 15))) %>%
-      formatCurrency("Total")
+      formatCurrency(c("Total", "Goal Target")) %>%
+      formatPercentage("Progress %", digits = 1)
   })
 
   output$trend_category_filter <- renderUI({
