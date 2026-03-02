@@ -1,0 +1,8 @@
+---
+title: "Test"
+output: blastula::blastula_email
+---
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(plotly)
+plot_ly(x = c(1, 2, 3), y = c(1, 2, 3), type="scatter", mode="lines")
+```

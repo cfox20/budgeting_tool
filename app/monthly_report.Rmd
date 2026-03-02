@@ -1,0 +1,148 @@
+---
+title: "Monthly Budget Report"
+author: "Slater Household Budgeting"
+date: today
+output: blastula::blastula_email
+params:
+  report_month: NULL
+  report_data_path: NULL
+  category_summary_path: NULL
+  active_budgets_path: NULL
+  recent_expenses_path: NULL
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(knitr)
+library(kableExtra)
+
+report_data <- if (!is.null(params$report_data_path) && file.exists(params$report_data_path)) readRDS(params$report_data_path) else NULL
+category_summary <- if (!is.null(params$category_summary_path) && file.exists(params$category_summary_path)) readRDS(params$category_summary_path) else NULL
+active_budgets <- if (!is.null(params$active_budgets_path) && file.exists(params$active_budgets_path)) readRDS(params$active_budgets_path) else NULL
+recent_expenses <- if (!is.null(params$recent_expenses_path) && file.exists(params$recent_expenses_path)) readRDS(params$recent_expenses_path) else NULL
+
+total_limit <- if (!is.null(report_data)) sum(report_data$Limit, na.rm = TRUE) else 0
+total_spent <- if (!is.null(report_data)) sum(report_data$Total, na.rm = TRUE) else 0
+total_diff <- total_limit - total_spent
+status_text <- if (total_diff >= 0) "Under Budget" else "Over Budget"
+```
+
+## Budget Performance Overview
+
+For the period: **`r if(is.null(params$report_month) || params$report_month == 'all') 'All Time' else format(as.Date(params$report_month), '%B %Y')`**
+
+```{r summary-boxes, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+summary_df <- data.frame(
+  `Total Budget` = scales::dollar(total_limit),
+  `Total Spent` = scales::dollar(total_spent),
+  `Net Result` = paste0(scales::dollar(abs(total_diff)), " (", status_text, ")"),
+  check.names = FALSE
+)
+k <- kable(summary_df, format = "html", align = "c") %>%
+  kable_styling(full_width = FALSE) %>%
+  row_spec(0, bold = TRUE, background = "#f8f9fa", color = "#666666") %>%
+  column_spec(3, color = ifelse(total_diff >= 0, "green", "red"), bold = TRUE)
+cat(sprintf("%s", k))
+```
+
+\vspace{0.5cm}
+
+## Category and Subcategory Details
+
+```{r report-table, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+if (!is.null(report_data) && nrow(report_data) > 0) {
+  table_display <- report_data %>%
+    select(Category, Subcategory, Limit, Total, Remaining, Status, Transactions) %>%
+    mutate(
+      Limit = scales::dollar(Limit),
+      Total = scales::dollar(Total),
+      Remaining = scales::dollar(Remaining)
+    )
+
+  ktable <- kable(table_display, format = "html") %>%
+    kable_styling(full_width = FALSE, font_size = 10) %>%
+    row_spec(0, bold = TRUE)
+
+  cat(sprintf("%s", ktable))
+} else {
+  cat("No data available for the period.")
+}
+```
+
+\newpage
+
+## Spending vs Budget
+
+```{r category-plot, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=8, out.width="100%"}
+if (!is.null(category_summary) && !is.null(active_budgets)) {
+  expense_cat_summary <- category_summary %>%
+    mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
+    group_by(Category) %>%
+    summarise(Total = sum(Total, na.rm = TRUE), .groups = "drop")
+
+  budget_cat_summary <- active_budgets %>%
+    mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
+    group_by(Category) %>%
+    summarise(Limit = sum(Limit, na.rm = TRUE), .groups = "drop")
+
+  plot_summary <- full_join(expense_cat_summary, budget_cat_summary, by = "Category") %>%
+    mutate(
+      Total = tidyr::replace_na(Total, 0),
+      Limit = tidyr::replace_na(Limit, 0),
+      Percent = if_else(Limit > 0, (Total / Limit) * 100, if_else(Total > 0, 100, 0)),
+      Fill = if_else((Limit > 0 & Total > Limit) | (Limit == 0 & Total > 0), "#d73027", "#1b9e77")
+    ) %>%
+    arrange(Percent)
+
+  if (nrow(plot_summary) > 0) {
+    max_percent <- max(plot_summary$Percent, na.rm = TRUE)
+    if (!is.finite(max_percent)) max_percent <- 0
+    upper_limit <- max(100, ceiling(max_percent / 10) * 10)
+
+    p <- ggplot(plot_summary, aes(x = reorder(Category, Percent), y = Percent)) +
+      geom_col(aes(fill = Fill), show.legend = FALSE) +
+      geom_hline(yintercept = 100, linetype = "dashed", color = "#333333", linewidth = 0.8) +
+      labs(x = "Category", y = "Percent of budget") +
+      scale_y_continuous(labels = scales::label_percent(scale = 1), limits = c(0, upper_limit)) +
+      scale_fill_identity() +
+      theme_minimal(base_size = 14) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    print(p)
+  } else {
+    cat("No data available to plot.")
+  }
+} else {
+  cat("No data available to plot.")
+}
+```
+
+\vspace{0.5cm}
+
+## Recent Spending (Last 4 Weeks)
+
+```{r recent-spending, echo=FALSE, message=FALSE, warning=FALSE, fig.height=4, fig.width=8, out.width="100%"}
+if (!is.null(recent_expenses) && nrow(recent_expenses) > 0) {
+  # aggregate by date and category
+  plot_data <- recent_expenses %>%
+    mutate(Category = ifelse(nzchar(Category), Category, "(Uncategorized)")) %>%
+    group_by(Date, Category) %>%
+    summarise(Amount = sum(Amount, na.rm = TRUE), .groups = "drop")
+
+  p <- ggplot(plot_data, aes(x = Date, y = Amount, color = Category)) +
+    geom_line(linewidth = 1) +
+    geom_point(size = 2) +
+    scale_y_continuous(labels = scales::dollar_format()) +
+    labs(x = "Date", y = "Amount Spent", color = "Category") +
+    theme_minimal(base_size = 14) +
+    theme(legend.position = "bottom")
+  print(p)
+} else {
+  cat("No recent expenses to plot.")
+}
+```
