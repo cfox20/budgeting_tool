@@ -53,7 +53,8 @@ empty_goals <- tibble::tibble(
   Goal = character(),
   TargetAmount = numeric(),
   TargetMonth = as.Date(character()),
-  CreatedDate = as.Date(character())
+  CreatedDate = as.Date(character()),
+  Completed = logical()
 )
 
 empty_goal_progress <- tibble::tibble(
@@ -237,16 +238,25 @@ load_goals <- function() {
   if (!file.exists(goals_path)) {
     return(empty_goals)
   }
-  readr::read_csv(
+
+  df <- readr::read_csv(
     goals_path,
     col_types = cols(
       Goal = col_character(),
       TargetAmount = col_double(),
       TargetMonth = col_date(),
-      CreatedDate = col_date()
+      CreatedDate = col_date(),
+      Completed = col_logical()
     ),
     show_col_types = FALSE
   )
+
+  if (!"Completed" %in% names(df)) {
+    df$Completed <- FALSE
+  }
+
+  df %>%
+    mutate(Completed = replace_na(Completed, FALSE))
 }
 
 write_goals <- function(df) {
@@ -411,13 +421,6 @@ ui <- navbarPage(
             choices = NULL,
             options = list(placeholder = "Select or add a payer", create = TRUE)
           ),
-          selectizeInput(
-            "expense_type",
-            "Expense Type",
-            choices = c("Monthly", "Goal"),
-            selected = "Monthly",
-            options = list(create = FALSE)
-          ),
           actionButton("add_expense", "Add expense", class = "btn-primary"),
           br(),
           br(),
@@ -552,7 +555,10 @@ ui <- navbarPage(
         column(
           width = 8,
           h3("Your Goals"),
-          uiOutput("goals_list_ui")
+          uiOutput("goals_list_ui"),
+          hr(),
+          h3("Old Goals"),
+          uiOutput("old_goals_list_ui")
         )
       )
     )
@@ -1884,12 +1890,12 @@ server <- function(input, output, session) {
   # Goals Logic ---------------------------------------------------------------
 
 
-  progress_bar <- function(value, label = "") {
+  progress_bar <- function(value, label = "", bar_class = "progress-bar-success") {
     tags$div(
       class = "progress",
       style = "margin-bottom: 5px;",
       tags$div(
-        class = "progress-bar progress-bar-success",
+        class = paste("progress-bar", bar_class),
         role = "progressbar",
         `aria-valuenow` = value,
         `aria-valuemin` = 0,
@@ -1922,7 +1928,8 @@ server <- function(input, output, session) {
       Goal = name,
       TargetAmount = target,
       TargetMonth = floor_date(month, "month"),
-      CreatedDate = Sys.Date()
+      CreatedDate = Sys.Date(),
+      Completed = FALSE
     )
 
     current <- goals()
@@ -1940,20 +1947,19 @@ server <- function(input, output, session) {
   })
 
   output$goals_list_ui <- renderUI({
-    current_goals <- goals()
-    if (nrow(current_goals) == 0) {
-      return(tags$p("No goals added yet."))
+    active_goals <- goals() %>% filter(!Completed)
+    if (nrow(active_goals) == 0) {
+      return(tags$p("No active goals."))
     }
 
     current_month <- floor_date(Sys.Date(), "month")
     progress_data <- goal_progress()
+    expense_data <- expenses() %>% mutate(ExpenseType = normalize_expense_type(ExpenseType))
 
-    goal_elements <- lapply(seq_len(nrow(current_goals)), function(i) {
-      g <- current_goals[i, ]
-
+    goal_elements <- lapply(seq_len(nrow(active_goals)), function(i) {
+      g <- active_goals[i, ]
       monthly_saving <- get_goal_monthly_saving(g)
 
-      # Percentage based on months saved
       months_saved <- progress_data %>%
         filter(Goal == g$Goal, Saved == TRUE) %>%
         nrow()
@@ -1961,12 +1967,22 @@ server <- function(input, output, session) {
       total_months_needed <- interval(floor_date(g$CreatedDate, "month"), g$TargetMonth) %/% months(1)
       if (total_months_needed <= 0) total_months_needed <- 1
 
-      percent <- min(100, round((months_saved / total_months_needed) * 100))
+      saved_percent <- min(100, round((months_saved / total_months_needed) * 100))
+
+      goal_spent <- expense_data %>%
+        filter(ExpenseType == "Goal", Category == g$Goal) %>%
+        summarise(total = sum(Amount, na.rm = TRUE)) %>%
+        pull(total)
+      if (!is.finite(goal_spent) || length(goal_spent) == 0) goal_spent <- 0
+
+      spent_percent <- min(100, round((goal_spent / g$TargetAmount) * 100))
 
       is_saved_this_month <- progress_data %>%
         filter(Goal == g$Goal, Month == current_month) %>%
         pull(Saved)
       if (length(is_saved_this_month) == 0) is_saved_this_month <- FALSE
+
+      is_complete <- isTRUE(g$Completed)
 
       wellPanel(
         style = "padding: 10px; margin-bottom: 10px;",
@@ -1976,18 +1992,44 @@ server <- function(input, output, session) {
             align = "right",
             actionButton(paste0("del_goal_", i), "",
               icon = icon("trash"), class = "btn-danger btn-xs",
-              onclick = sprintf("Shiny.setInputValue('delete_goal_id', %d, {priority: 'event'})", i)
+              onclick = sprintf("Shiny.setInputValue('delete_goal_id', %d, {priority: 'event'})", which(goals()$Goal == g$Goal)[1])
             )
           )
         ),
         p(paste0("Target: ", dollar(g$TargetAmount), " by ", format(g$TargetMonth, "%B %Y")), style = "margin-bottom: 5px;"),
         p(paste0("Monthly saving required: ", dollar(monthly_saving)), style = "margin-bottom: 10px;"),
-        progress_bar(percent, label = paste0(percent, "%")),
-        checkboxInput(paste0("save_goal_", i), "Money saved for this month", value = is_saved_this_month)
+        p("Saved progress", style = "margin-bottom: 2px;"),
+        progress_bar(saved_percent, label = paste0(saved_percent, "%"), bar_class = "progress-bar-success"),
+        p(paste0("Spent progress (", dollar(goal_spent), " of ", dollar(g$TargetAmount), ")"), style = "margin-bottom: 2px;"),
+        progress_bar(spent_percent, label = paste0(spent_percent, "%"), bar_class = "progress-bar-warning"),
+        checkboxInput(paste0("save_goal_", i), "Money saved for this month", value = is_saved_this_month),
+        checkboxInput(paste0("complete_goal_", i), "Mark this goal complete", value = is_complete)
       )
     })
 
     do.call(tagList, goal_elements)
+  })
+
+  output$old_goals_list_ui <- renderUI({
+    old_goals <- goals() %>% filter(Completed)
+    if (nrow(old_goals) == 0) {
+      return(tags$p("No completed goals yet."))
+    }
+
+    tagList(
+      lapply(seq_len(nrow(old_goals)), function(i) {
+        g <- old_goals[i, ]
+        wellPanel(
+          style = "padding: 10px; margin-bottom: 10px; background-color: #f7f7f7;",
+          strong(g$Goal),
+          p(paste0("Target: ", dollar(g$TargetAmount), " by ", format(g$TargetMonth, "%B %Y")), style = "margin-bottom: 5px;"),
+          p("Saved progress", style = "margin-bottom: 2px;"),
+          progress_bar(100, label = "100%", bar_class = "progress-bar-success"),
+          p("Spent progress", style = "margin-bottom: 2px;"),
+          progress_bar(100, label = "100%", bar_class = "progress-bar-warning")
+        )
+      })
+    )
   })
 
   observeEvent(input$delete_goal_id, {
@@ -2008,21 +2050,23 @@ server <- function(input, output, session) {
   })
 
   observe({
-    current_goals <- goals()
+    current_goals <- goals() %>% filter(!Completed)
     if (nrow(current_goals) == 0) {
       return()
     }
 
     current_month <- floor_date(Sys.Date(), "month")
     prog <- goal_progress()
-    changed <- FALSE
+    goal_df <- goals()
+    progress_changed <- FALSE
+    goal_changed <- FALSE
 
     for (i in seq_len(nrow(current_goals))) {
-      input_id <- paste0("save_goal_", i)
-      if (!is.null(input[[input_id]])) {
-        val <- input[[input_id]]
-        goal_name <- current_goals$Goal[i]
+      goal_name <- current_goals$Goal[i]
 
+      save_input_id <- paste0("save_goal_", i)
+      if (!is.null(input[[save_input_id]])) {
+        val <- input[[save_input_id]]
         existing_idx <- which(prog$Goal == goal_name & prog$Month == current_month)
         is_saved <- if (length(existing_idx) > 0) prog$Saved[existing_idx] else FALSE
 
@@ -2032,19 +2076,35 @@ server <- function(input, output, session) {
           } else {
             prog <- bind_rows(prog, tibble(Goal = goal_name, Month = current_month, Saved = val))
           }
-          changed <- TRUE
+          progress_changed <- TRUE
+        }
+      }
+
+      complete_input_id <- paste0("complete_goal_", i)
+      if (!is.null(input[[complete_input_id]])) {
+        complete_val <- isTRUE(input[[complete_input_id]])
+        current_complete <- isTRUE(goal_df$Completed[goal_df$Goal == goal_name][1])
+
+        if (complete_val != current_complete) {
+          goal_df$Completed[goal_df$Goal == goal_name] <- complete_val
+          goal_changed <- TRUE
         }
       }
     }
 
-    if (changed) {
+    if (progress_changed) {
       goal_progress(prog)
       write_goal_progress(prog)
+    }
+
+    if (goal_changed) {
+      goals(goal_df)
+      write_goals(goal_df)
     }
   })
 
   output$goals_monthly_summary <- renderUI({
-    current_goals <- goals()
+    current_goals <- goals() %>% filter(!Completed)
     if (nrow(current_goals) == 0) {
       return(tags$p("No active goals."))
     }
