@@ -61,7 +61,7 @@ empty_goal_progress <- tibble::tibble(
 )
 
 
-default_payers <- c("Joint", "Carson", "Chloe")
+default_payers <- c("Joint", "Caleb", "Rae")
 
 clean_subcategory <- function(x) {
   if (is.null(x)) {
@@ -602,51 +602,111 @@ server <- function(input, output, session) {
 
   # Import Logic --------------------------------------------------------------
 
-  observeEvent(input$file_import, {
-    req(input$file_import)
-    file <- input$file_import
-
-    tryCatch(
-      {
-        # Read first few lines to detect format
+        observeEvent(input$file_import, {
+      req(input$file_import)
+      file <- input$file_import
+    
+      tryCatch({
         header_line <- readLines(file$datapath, n = 1)
-
+    
         raw_df <- NULL
         is_credit_card <- grepl("Status,Date,Description,Debit,Credit,Member Name", header_line, fixed = TRUE)
-
+        is_chase <- grepl("Transaction Date,Post Date,Description,Category,Type,Amount,Memo", header_line, fixed = TRUE)
+        is_chase_simple <- grepl("Trans. Date,Post Date,Description,Amount,Category", header_line, fixed = TRUE)
+        is_chase_bank <- grepl("Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #", header_line, fixed = TRUE)
+    
         if (is_credit_card) {
-          # Format A: Credit Card
-          # Status,Date,Description,Debit,Credit,Member Name
           dt <- readr::read_csv(
             file$datapath,
             col_types = cols(
-              Date = col_character(), # Read as char first to handle formats
+              Date = col_character(),
               Description = col_character(),
               Debit = col_double(),
               Credit = col_double(),
+              `Member Name` = col_character(),
               .default = col_character()
             )
           )
-
-          # Extract expenses (Debit > 0)
-          # Note: User said "only negative" generally, but CC CSV has Debits as positive expenses.
-          # We want Expenses.
-          raw_df <- dt %>%
-            filter(!is.na(Debit) & Debit > 0) %>%
+          raw_df <- dt |>
+            filter(!is.na(Debit) & Debit > 0) |>
             mutate(
               Amount = Debit,
-              Date = mdy(Date),
+              Date = lubridate::mdy(Date),
+              Description = Description,
+              Category = "",
               Payer = case_when(
-                grepl("CARSON", `Member Name`, ignore.case = TRUE) ~ "Carson",
-                grepl("CHLOE", `Member Name`, ignore.case = TRUE) ~ "Chloe",
+                grepl("CALEB", `Member Name`, ignore.case = TRUE) ~ "Caleb",
+                grepl("RAE", `Member Name`, ignore.case = TRUE) ~ "Rae",
                 TRUE ~ "Joint"
               )
-            ) %>%
-            select(Date, Description, Amount, Payer)
+            ) |>
+            select(Date, Description, Amount, Category, Payer)
+        } else if (is_chase) {
+          dt <- readr::read_csv(
+            file$datapath,
+            col_types = cols(
+              `Transaction Date` = col_character(),
+              Description = col_character(),
+              Category = col_character(),
+              Type = col_character(),
+              Amount = col_double(),
+              .default = col_character()
+            )
+          )
+          raw_df <- dt |>
+            filter(Type == "Sale", Amount < 0) |>
+            mutate(
+              Amount = abs(Amount),
+              Date = lubridate::mdy(`Transaction Date`),
+              Description = Description,
+              Category = Category,
+              Payer = "Joint"
+            ) |>
+            select(Date, Description, Amount, Category, Payer)
+        } else if (is_chase_simple) {
+          dt <- readr::read_csv(
+            file$datapath,
+            col_types = cols(
+              `Trans. Date` = col_character(),
+              Description = col_character(),
+              Amount = col_double(),
+              Category = col_character(),
+              .default = col_character()
+            )
+          )
+          raw_df <- dt |>
+            filter(Amount > 0) |>
+            mutate(
+              Amount = Amount,
+              Date = lubridate::mdy(`Trans. Date`),
+              Description = Description,
+              Category = Category,
+              Payer = "Joint"
+            ) |>
+            select(Date, Description, Amount, Category, Payer)
+        } else if (is_chase_bank) {
+          dt <- readr::read_csv(
+            file$datapath,
+            col_types = cols(
+              Details = col_character(),
+              `Posting Date` = col_character(),
+              Description = col_character(),
+              Amount = col_double(),
+              Type = col_character(),
+              .default = col_character()
+            )
+          )
+          raw_df <- dt |>
+            filter(Details == "DEBIT", Amount < 0) |>
+            mutate(
+              Amount = abs(Amount),
+              Date = lubridate::mdy(`Posting Date`),
+              Description = Description,
+              Category = "",
+              Payer = "Joint"
+            ) |>
+            select(Date, Description, Amount, Category, Payer)
         } else {
-          # Format B: Checking / Bank (No Header or Generic)
-          # Assuming structure: Col 1 = Date, Col 2 = Amount, Col 5 = Description
-          # And Expenses are Negative Amounts.
           dt <- readr::read_csv(
             file$datapath,
             col_names = FALSE,
@@ -657,88 +717,69 @@ server <- function(input, output, session) {
               .default = col_character()
             )
           )
-
-          # Keep only rows where Amount is negative (Expense)
-          raw_df <- dt %>%
-            filter(!is.na(X2) & X2 < 0) %>%
+          raw_df <- dt |>
+            filter(!is.na(X2) & X2 < 0) |>
             mutate(
-              Amount = abs(X2), # Convert to positive for the app
-              Date = mdy(X1),
+              Amount = abs(X2),
+              Date = lubridate::mdy(X1),
               Description = X5,
+              Category = "",
               Payer = "Joint"
-            ) %>%
-            select(Date, Description, Amount, Payer)
+            ) |>
+            select(Date, Description, Amount, Category, Payer)
         }
-
+    
         if (nrow(raw_df) == 0) {
           showNotification("No expenses found in file.", type = "warning")
           return()
         }
-
-        # Initialize Staging Data
-        # Add ID for tracking
-        staged <- raw_df %>%
+    
+        staged <- raw_df |>
           mutate(
             id = row_number(),
-            Category = "",
+            Category = ifelse(is.na(Category), "", Category),
             Subcategory = "",
             Duplicate = FALSE
           )
-
-        # Duplicate Detection
+    
         history <- expenses()
-
-        # 1. Internal Deduplication (within the uploaded file)
-        # We flag them first, then we will filter at the end of this block
-        staged <- staged %>%
-          group_by(Date, Description, Amount, Payer) %>%
-          mutate(temp_id = row_number()) %>%
-          mutate(InternalDuplicate = temp_id > 1) %>%
-          ungroup() %>%
+    
+        staged <- staged |>
+          group_by(Date, Description, Amount, Payer) |>
+          mutate(temp_id = row_number()) |>
+          mutate(InternalDuplicate = temp_id > 1) |>
+          ungroup() |>
           select(-temp_id)
-
-        # 2. Historical Duplicate Detection (against existing data)
+    
         if (nrow(history) > 0) {
-          # Check for exact matches on Date & Amount
-          # Then check Description similarity
           staged$Duplicate <- vapply(seq_len(nrow(staged)), function(i) {
             row <- staged[i, ]
-            candidates <- history %>%
+            candidates <- history |>
               filter(Date == row$Date, abs(Amount - row$Amount) < 0.01)
-
             if (nrow(candidates) == 0) {
               return(FALSE)
             }
-
-            # Check description similarity (Levensthein)
-            # If any candidate has similarity > threshold, flag as duplicate
             dists <- stringdist::stringdist(tolower(row$Description), tolower(candidates$Description), method = "lv")
-            # If description is very short, be strict. If long, allow some diff.
-            # Simple heuristic: exact match is best, but let's say "contains" or small diff
             any(dists < 5 | grepl(tolower(row$Description), tolower(candidates$Description), fixed = TRUE))
           }, logical(1))
         }
-
-        # Automatic Removal
+    
         n_initial <- nrow(staged)
-        staged <- staged %>% filter(!Duplicate & !InternalDuplicate)
+        staged <- staged |> filter(!Duplicate & !InternalDuplicate)
         n_removed <- n_initial - nrow(staged)
-
+    
         if (n_removed > 0) {
           showNotification(paste("Automatically removed", n_removed, "duplicate entries."), type = "message")
         }
-
-        # Cleanup internal flags
-        staged <- staged %>% select(-InternalDuplicate)
-
+    
+        staged <- staged |> select(-InternalDuplicate)
+    
         staged_expenses(staged)
         staged_render_trigger(staged_render_trigger() + 1)
-      },
-      error = function(e) {
+      }, error = function(e) {
         showNotification(paste("Error parsing file:", e$message), type = "error")
-      }
-    )
-  })
+      })
+    })
 
   output$import_ui <- renderUI({
     # Only re-render if data is cleared OR a new file is uploaded
@@ -785,7 +826,7 @@ server <- function(input, output, session) {
             selectizeInput(
               "staged_payer",
               "Payer",
-              choices = c("Joint", "Carson", "Chloe"),
+              choices = c("Joint", "Caleb", "Rae"),
               options = list(create = TRUE)
             ),
             actionButton("apply_staged_edits", "Apply Changes", class = "btn-success btn-block")
@@ -1703,7 +1744,7 @@ server <- function(input, output, session) {
     validate(
       need(nzchar(name), "Provide a goal name."),
       need(!is.na(target) && target > 0, "Enter a positive target amount."),
-      need(!is.na(month) && month > Sys.Date(), "Target month must be in the future.")
+      need(!is.na(month), "Target month must be in the future.")
     )
 
     new_goal <- tibble::tibble(
@@ -2795,11 +2836,11 @@ server <- function(input, output, session) {
 
         blastula::smtp_send(
           email = email,
-          from = "carsonslater7@gmail.com",
+          from = "caleb.scott.fox@gmail.com",
           to = input$report_email_to,
           subject = paste("Budget Report -", month_str),
           credentials = blastula::creds_envvar(
-            user = "carsonslater7@gmail.com",
+            user = "caleb.scott.fox@gmail.com",
             pass_envvar = "SMTP_PASSWORD",
             host = "smtp.gmail.com",
             port = 465,
