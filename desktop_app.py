@@ -14,6 +14,18 @@ import urllib.error
 import urllib.request
 from contextlib import closing
 
+# --------------------------------------------------------------------
+# Determine the directory where the .exe is located (PyInstaller-safe)
+# --------------------------------------------------------------------
+def resource_path(relative_path: str) -> str:
+    """
+    Return the absolute path to a resource, whether running as a script
+    or as a PyInstaller bundle.
+    """
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.argv[0])))
+    return os.path.join(base_path, relative_path)
+
+
 
 def find_free_port() -> int:
     """Return an available localhost port."""
@@ -78,8 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--app-script",
-        default="run_app.R",
-        help="Path to the R launcher script (default: %(default)s)",
+        default=resource_path("run_app.R"),
+        help="Path to the R launcher script",
     )
     parser.add_argument(
         "--timeout",
@@ -117,6 +129,13 @@ def main(argv: list[str] | None = None) -> int:
         raise
 
     window = webview.create_window("Household Budgeting", url)
+
+    def on_closed() -> None:
+        """Ensure the Shiny process stops if the window is closed."""
+
+        terminate_process(process)
+
+    window.events.closed += on_closed  # type: ignore[attr-defined]
 
     try:
         webview.start()
