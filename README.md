@@ -9,6 +9,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 - **Safe persistence** – expenses are stored in `data/expenses.csv`. When you save updates, the previous version is copied to `data/expenses_backup.csv` after you confirm the change.
 - **Spending analytics** – filter by date range (defaults to the last month), exclude non-positive amounts, inspect totals by category, and view a bar chart of spending along with the detailed transaction list.
 - **Budget planning** – capture multiple income sources, set monthly targets for each category, and track progress plus over/under budget categories in the reports tab.
+- **Goal project allocations** – assign budget line items to one-time goals (e.g., vacations or home projects) so matching expenses are tracked under goals instead of counting against monthly budget limits.
 - **Desktop integration** – helper script can drop a ready-to-use desktop shortcut on Windows, macOS, or Linux (and will use your custom icon if you add one).
 
 
@@ -54,6 +55,7 @@ This repository contains a local-first [Shiny](https://shiny.posit.co/) applicat
 - `data/expenses_backup.csv` – the most recent backup created right before you confirm a save. Review the modal preview carefully before overwriting the backup.
 - `data/income_sources.csv` – saved list of your income sources and the amounts entered on the Budget Planning tab.
 - `data/category_budget.csv` – saved monthly targets by category used to compare actual spending against your goals.
+- `data/goal_budget_links.csv` – mapping of goal names to category/subcategory budget line items and active dates used to classify project spending.
 - `resources/icon_bytes.R` – raw byte vector that is converted into the Windows `.ico` file whenever the shortcut helper runs.
 - `resources/budgeting_tool.ico` – generated Windows icon file consumed by the desktop shortcut generator (ignored by Git).
 
