@@ -411,6 +411,13 @@ ui <- navbarPage(
             choices = NULL,
             options = list(placeholder = "Select or add a payer", create = TRUE)
           ),
+          selectizeInput(
+            "expense_type",
+            "Expense Type",
+            choices = c("Monthly", "Goal"),
+            selected = "Monthly",
+            options = list(create = FALSE)
+          ),
           actionButton("add_expense", "Add expense", class = "btn-primary"),
           br(),
           br(),
@@ -1485,6 +1492,7 @@ server <- function(input, output, session) {
     category <- if (expense_type == "Goal") selected_goal else trimws(input$expense_category)
     subcategory <- if (expense_type == "Goal") "" else trimws(input$expense_subcategory)
     payer <- trimws(input$expense_payer)
+    expense_type <- normalize_expense_type(input$expense_type)
 
     validate(
       need(
@@ -1503,6 +1511,10 @@ server <- function(input, output, session) {
       need(
         expense_type != "Goal" || category %in% goals()$Goal,
         "For Goal expenses, selected goal must exist."
+      ),
+      need(
+        expense_type != "Goal" || category %in% goals()$Goal,
+        "For Goal expenses, Category must exactly match an existing goal name."
       ),
       need(
         !is.null(input$expense_amount) &&
@@ -1535,7 +1547,6 @@ server <- function(input, output, session) {
       server = FALSE
     )
     updateSelectizeInput(session, "expense_type", selected = "Monthly", server = FALSE)
-    updateSelectizeInput(session, "expense_goal", selected = "", server = FALSE)
     showNotification("Expense added.", type = "message")
   })
 
